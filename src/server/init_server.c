@@ -5,16 +5,16 @@ int size=0;
 char strtmp[100];
 strcpy(strtmp,s1->get_str());
 if(!strcmp(strtmp,"POST")){
-start_post_sequence(s1);
+return start_post_sequence(s1);
 }else if(!strcmp(strtmp,"GET")){
-start_get_sequence(s1);
+return start_get_sequence(s1);
 }
 else if(!strcmp(strtmp,"SIGN_UP")){
 ///SIGN_UP IS FOR NEW USERS
-create_new_account(s1);
+return create_new_account(s1);
 }else if(!strcmp(strtmp,"SIGN_IN")){
 ///SIGN_IN IS FOR NEW SESSION FOR ALREADY EXISTING USERS OR SIGNED_UP USERS.
-new_session(s1);
+return new_session(s1);
 }
 return 1;
 }
