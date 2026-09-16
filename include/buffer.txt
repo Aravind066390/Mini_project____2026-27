@@ -1,0 +1,14 @@
+Part	                What it does
+1.)Data_pack	        Stores who owns the buffer (owner) and where the buffer is located (ptr)
+2.)generate_system()	Creates the main shared memory space
+3.)start_system()	Opens/starts using the existing shared memory space
+4.)destroy_system()	Removes the shared memory area
+5.)clear_system()	Closes the shared memory mapping
+6.)validity()	        Checks whether a process is allowed to access a particular buffer
+7.)revalidate()	        Gives/reassigns access to a process
+8.)add_validity()	Adds a process as an authorized user of the buffer
+9.)int_write() etc.	Writes different data types into the buffer
+10.)int_read() etc.	Reads data from the buffer
+11.)take_validity()	Allows a process to take/reclaim access to a buffer
+12.)destroy_pack()	Removes a particular shared-memory buffer
+13.)~data_pack()	Automatically closes the memory when the object is destroyed
