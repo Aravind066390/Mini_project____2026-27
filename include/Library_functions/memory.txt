@@ -1,0 +1,173 @@
+1. Main custom datatypes
+Datatype	Where used	What it represents	Purpose in your library
+memory_addr	typedef struct memory_addr	A record describing one shared-memory region	Stores the ID, shared-memory name, mapped address, size, and link to the next region
+memory_addr *	records, head, temp, find_space() etc.	Pointer to a memory_addr record	Used to maintain and traverse the linked list of memory regions
+quee	typedef struct quee	Small structure containing queue state and position/data	Used by read_space() and write_space() to return ring-buffer operation results
+2. memory_addr structure
+typedef struct memory_addr{
+    int addr;
+    char value[6];
+    void *loc;
+    int sizes;
+    struct memory_addr *next;
+} memory_addr;
+Member	Datatype	Meaning	Purpose
+addr	int	File descriptor	Identifies the opened POSIX shared-memory object
+value	char[6]	String representation of the memory ID	Stores names such as "0", "1", etc. for shm_open() / shm_unlink()
+loc	void *	Generic memory address	Stores the address returned by mmap()
+sizes	int	Size of mapped region	Required later by munmap()
+next	struct memory_addr *	Pointer to another record	Connects records into a linked list
+
+So conceptually:
+
+memory_addr
+ ├── addr   → shared-memory file descriptor
+ ├── value  → shared-memory name
+ ├── loc    → mapped memory address
+ ├── sizes  → mapped size
+ └── next   → next memory_addr
+3. void *
+Usage	Meaning	Why used
+void *loc	Generic pointer	mmap() can map arbitrary memory, so the library keeps its address as a generic pointer
+records->loc	Beginning of mapped region	Other libraries can cast it to whatever datatype they need
+
+For example, your other libraries do things like:
+
+(pid_t *)t->loc
+
+or
+
+(int *)ptr->loc
+
+So void * acts as the generic entry point to the shared memory.
+
+4. memory_addr *
+Variable/function	Type	Role
+records	memory_addr *	Points to the most recently created record
+head	memory_addr *	Points to the first memory record
+temp	memory_addr *	Traversal pointer
+backe	memory_addr *	Keeps track of the previous record
+find_space()	memory_addr * return	Returns the record describing a requested memory space
+find_space_ptr()	void * return	Returns only the mapped address
+
+Your records therefore form a linked list:
+
+head
+ ↓
+┌─────────────┐      ┌─────────────┐      ┌─────────────┐
+│ memory_addr │ ───→ │ memory_addr │ ───→ │ memory_addr │
+│ loc         │      │ loc         │      │ loc         │
+│ size        │      │ size        │      │ size        │
+│ next ───────┼─────→│ next ───────┼─────→│ NULL        │
+└─────────────┘      └─────────────┘      └─────────────┘
+5. quee datatype
+typedef struct quee{
+    int a,c;
+    char b;
+} quee;
+Member	Datatype	Meaning in your functions
+a	int	Next/current position in the circular buffer
+c	int	Status of the operation
+b	char	Data read from the buffer
+quee	Structure	Packages all three results together
+
+Your functions use it like:
+
+quee a;
+
+and return it:
+
+return a;
+
+So instead of returning only one value, read_space() / write_space() can return position + status + data together.
+
+6. char *
+Usage	Purpose
+read_space(char *s,...)	Treats s as the circular-buffer memory
+write_space(char *s,...)	Writes a character into the shared buffer
+find_space_ptr() indirectly	Returned memory can later be interpreted as char *
+char * casts around mmap()	Allows byte-level pointer arithmetic
+
+For example:
+
+s[(upper%sizes)] = ch;
+
+means the mapped memory is being treated as an array of characters.
+
+7. int *
+
+Used here:
+
+((int *)ptr->loc)[1]
+Datatype	Meaning
+int *	Treat the mapped memory as an array of integers
+((int *)ptr->loc)[1]	Access the second integer stored in that memory
+
+This is particularly important because your shared-memory region itself is void *, but the consumer decides how to interpret it.
+
+8. Other important system/library datatypes
+Datatype	Source	Purpose in MEMORY_H
+std::mutex	<mutex>	Provides a C++ mutex object; declared globally as m
+FILE / FILE *	<cstdio>	Not actually used in the shown implementation
+size_t	System/C library	Conceptually related to memory sizes, although your code currently uses int for sizes
+File descriptor (int)	POSIX	shm_open() returns it and close() releases it
+9. Important pointer/type relationships
+
+This is probably the most important part of your library:
+
+Expression	Interpretation
+memory_addr *	Pointer to your metadata record
+memory_addr	Metadata describing a shared-memory region
+memory_addr.loc	Generic pointer to the actual mapped memory
+void *	Untyped pointer to the mapped region
+(char *)loc	Treat mapped region as bytes/characters
+(int *)loc	Treat mapped region as integers
+(pid_t *)loc	Treat mapped region as process IDs
+find_space(s)	Get the metadata
+find_space_ptr(s)	Get the actual mapped address
+
+So your abstraction is essentially:
+
+                 MEMORY_H
+                    │
+                    ▼
+            memory_addr *
+                    │
+                    ▼
+             memory_addr
+          ┌─────────┴─────────┐
+          │                   │
+       Metadata            loc: void *
+                              │
+                 ┌────────────┼────────────┐
+                 ▼            ▼            ▼
+              char *        int *       pid_t *
+10. Overall datatype hierarchy
+memory_addr
+│
+├── int addr
+│
+├── char value[6]
+│
+├── void *loc
+│      │
+│      ├── char *
+│      ├── int *
+│      ├── pid_t *
+│      └── any other interpretation
+│
+├── int sizes
+│
+└── memory_addr *next
+        │
+        ▼
+   another memory_addr
+
+And separately:
+
+quee
+├── int a     → position
+├── int c     → status
+└── char b    → data
+
+The key datatype introduced by MEMORY_H is therefore memory_addr. It acts as the metadata/control object, while its void *loc points to the actual shared-memory region. quee is your small ring-buffer result datatype used to communicate the result of read_space() and write_space().
