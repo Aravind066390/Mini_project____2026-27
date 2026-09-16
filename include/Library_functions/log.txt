@@ -1,0 +1,8 @@
+FILE *fp	               Holds the file pointer for data.log
+log()	                   Opens/creates the log file
+fopen("data.log","a")	   Opens the file in append mode, so old logs aren't overwritten
+log_write()              Adds a new message to the log
+time(&now)	             Gets the current system time
+ctime(&now)	             Converts the time into readable form
+fprintf()	               Writes the timestamp and message to the file
+~log()	                 Frees the allocated memory
