@@ -1,0 +1,47 @@
+Datatype	Where used	What it means	What it stores	Purpose in your library
+sql_data	typedef struct	Custom structure/type	value, flt2, g, x	Internal container for SQL result data
+char **	sql_data.value	Pointer to multiple char * strings	Multiple dynamically allocated strings	Stores SQL output row-by-row
+float **	sql_data.flt2	Pointer to multiple float * arrays	Multiple dynamically allocated float arrays	Stores extracted numeric columns
+int g	sql_data.g	Integer counter	Number of float arrays currently stored	Tracks how many flt2 entries are being used
+int x	sql_data.x	Integer capacity	Maximum number of float * entries currently allocated	Controls dynamic expansion of flt2
+sqlr	class sqlr	Custom C++ class	SQL data + row information + functions	Main object representing an SQL result
+sql_data *	sqlr.A	Pointer to sql_data	Address of a sql_data structure	Connects sqlr to its internal data
+sqlr *	ask_sql() / inp_float()	Pointer to sqlr	Address of an SQL result object	Allows functions to work with the same SQL result without copying it
+float *	inp_float() → g	Pointer to floats	One dynamically allocated float array	Holds one extracted numeric field from all rows
+sql_data members
+Member	Datatype	Example	Meaning
+value	char **	{"10 Alice", "20 Bob"}	Collection of SQL result rows as strings
+flt2	float **	{ptr1, ptr2, ptr3}	Collection of extracted float arrays
+g	int	3	3 float arrays currently stored
+x	int	10	Space currently allocated for 10 float-array pointers
+sqlr members
+Member	Datatype	Meaning
+m	int	Number of row slots allocated
+n	int	Maximum size allocated for each row
+l	int	Number of rows currently stored
+A	sql_data *	Pointer to the internal SQL data structure
+Pointer hierarchy
+Type	Think of it as	Example in your library
+char	One character	'A'
+char *	One string	"Alice"
+char **	Multiple strings	"Alice", "Bob", "Charlie"
+float	One decimal number	25.5
+float *	Array of decimal numbers	[25.5, 30.2, 40.8]
+float **	Multiple float arrays	[25,30,40], [10,20,30]
+sql_data	SQL data container	Raw rows + extracted numbers
+sql_data *	Pointer to SQL data container	A inside sqlr
+sqlr	Complete SQL result object	sqlr *result
+sqlr *	Pointer to SQL result object	Returned by ask_sql()
+Overall structure
+Level	Datatype	Represents
+1	sqlr	Complete SQL result
+2	sql_data * A	Internal data belonging to result
+3	char ** value	Raw SQL rows
+4	char *	Individual SQL row
+3	float ** flt2	Extracted numeric data
+4	float *	One numeric column
+5	float	Individual numeric value
+
+So the key idea is:
+
+sqlr = SQL result object → sql_data = its data → char ** = raw rows → float ** = extracted numeric columns.
