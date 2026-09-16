@@ -1,0 +1,302 @@
+Custom / important datatypes
+Datatype	Where used	What it means	What it stores / represents	Purpose in your library
+struct stat	struct stat st;	POSIX file-status structure	File/directory metadata	Used to check whether downloads exists and is a directory
+FILE *	fp	Pointer to a C file stream	Open file/stream	Used for reading, writing and appending files
+memory_addr *	ptr	Pointer to your custom memory structure from memory.h	Address/metadata of a shared memory region	Used to access shared state associated with downloads
+char *	give_addr(), write_download() parameters, temp	Pointer to characters	Dynamically allocated string/path	Represents file paths, addresses and downloaded data
+int *	((int *)ptr->loc)	Pointer to integer data	Integer values stored at a memory location	Used to access download-related shared counters
+sem_t *	sem	Pointer to POSIX semaphore	Named semaphore	Provides synchronization between processes
+char[]	rec	Fixed-size character array	"records"	Stores a filename
+char * returned by give_addr()	Return type	Dynamically allocated string	Full download path	Gives the caller the address/path of a requested file
+struct stat
+
+You declare:
+
+struct stat st;
+
+struct stat is a POSIX system datatype used to hold information about a filesystem object.
+
+You use it here:
+
+stat("downloads",&st)
+
+and then:
+
+S_ISDIR(st.st_mode)
+Part	Datatype	Purpose
+st	struct stat	Stores filesystem information
+st.st_mode	Mode information	Contains file type and permission information
+S_ISDIR(...)	Macro	Checks whether the object is a directory
+
+In your library, it is specifically being used to determine:
+
+Does "downloads" exist?
+        │
+        ├── Yes → Is it a directory?
+        │
+        └── No → create downloads/
+FILE *
+
+You use:
+
+FILE *fp;
+
+This is a pointer to a C standard I/O file stream.
+
+For example:
+
+FILE *fp=fopen(temp,"r");
+
+The relationship is:
+
+FILE *
+  ↓
+FILE stream
+  ↓
+actual file
+
+You use it in several ways:
+
+Function	Mode	Purpose
+fopen(temp,"r")	Read	Check/open existing download
+fopen(s,"r")	Read	Check whether a file exists
+fopen(s,"w")	Write	Create a missing file
+fopen(rec,"a+")	Append + read	Open records for updating
+char *
+
+This is one of the main datatypes in your library.
+
+For example:
+
+char *give_addr(char *s)
+
+Here s represents the filename supplied by the caller.
+
+If:
+
+s = "video.mp4"
+
+then:
+
+strcpy(temp,"downloads/");
+strcat(temp,s);
+
+produces:
+
+downloads/video.mp4
+
+So in your library:
+
+char * usage	Represents
+s	Filename/input string
+temp	Dynamically allocated complete path
+addr	Address/path of the file
+data	Data to be written into the file
+char *temp
+
+This line:
+
+char *temp=(char *)malloc(1000);
+
+creates dynamically allocated character storage.
+
+Conceptually:
+
+temp
+ ↓
+┌──────────────────────────────────────┐
+│ downloads/example_file.txt\0         │
+└──────────────────────────────────────┘
+
+The important point is that temp is not the file itself.
+
+It is a string containing the path to the file.
+
+For example:
+
+temp → "downloads/test.txt"
+
+Then:
+
+fopen(temp,"r");
+
+uses that path to open the actual file.
+
+sem_t *
+
+You have:
+
+sem_t *sem=sem_open("/mysem",O_CREAT,0666,1);
+
+Here sem is a pointer to a POSIX named semaphore.
+
+Property	Value
+Datatype	sem_t *
+Name	/mysem
+Initial value	1
+Type	Named semaphore
+Purpose	Synchronization
+
+Conceptually:
+
+/mysem
+  ↓
+sem_t
+  ↓
+sem_t *
+  ↓
+sem
+
+A semaphore is useful when multiple processes may access shared download-related resources simultaneously.
+
+memory_addr *
+
+This comes from your own memory.h library:
+
+memory_addr *ptr=find_space(0);
+
+So your DOWNLOADS_H library is building on top of your memory library.
+
+The relationship is:
+
+DOWNLOADS_H
+     │
+     ↓
+ memory.h
+     │
+     ↓
+memory_addr
+
+You then access:
+
+ptr->loc
+
+which represents the memory location associated with that memory-space object.
+
+int *
+
+This is an interesting datatype use:
+
+((int *)ptr->loc)[1]
+
+Here you take ptr->loc and tell C:
+
+Treat this memory location as an array of int.
+
+The cast:
+
+(int *)ptr->loc
+
+produces:
+
+int *
+
+Then:
+
+((int *)ptr->loc)[1]
+
+accesses the second integer in that memory region.
+
+You use it as a counter:
+
+if(((int *)ptr->loc)[1]==0)
+
+and later:
+
+((int *)ptr->loc)[1]++;
+
+So the conceptual structure is:
+
+ptr->loc
+   │
+   ↓
+[int][counter][other memory...]
+       ↑
+       [1]
+
+Your code therefore uses a raw memory region from memory.h as typed integer storage.
+
+char[]
+
+You have:
+
+char rec[]="records";
+
+This creates a fixed-size character array.
+
+Its conceptual memory is:
+
+rec
+ ↓
+[r][e][c][o][r][d][s][\0]
+
+Unlike char *, this actually owns the character storage locally.
+
+It is then passed to:
+
+check(rec);
+fopen(rec,"a+");
+Constants / macros as datatypes
+
+You also introduce several macros:
+
+Macro	Value / expression	Meaning
+CREATE	0	Represents create mode
+RDWR	1	Represents read/write mode
+KB	1024	Kilobyte size
+MB	KB*1024	Megabyte size
+GB	MB*1024	Gigabyte size
+
+These are not datatypes. They are compile-time substitutions.
+
+For example:
+
+#define KB 1024
+
+means:
+
+100 * KB
+
+is effectively compiled as:
+
+100 * 1024
+Overall datatype hierarchy
+Level	Datatype	Role
+File metadata	struct stat	Determines whether downloads/ exists and is a directory
+File handling	FILE *	Opens and manipulates actual files
+Path/data	char *	Represents filenames, paths and data
+Path	char *temp	Dynamically constructed download path
+Synchronization	sem_t *	Points to named semaphore
+Memory system	memory_addr *	Points to your custom shared-memory descriptor
+Shared state	int *	Interprets part of ptr->loc as integer storage
+Local filename	char[]	Stores "records"
+Overall structure
+                 DOWNLOADS_H
+                      │
+        ┌─────────────┼──────────────┐
+        ↓             ↓              ↓
+      FILE *       char *        sem_t *
+        │             │              │
+        ↓             ↓              ↓
+     File I/O    File path/data   Synchronization
+                      │
+                      ↓
+              "downloads/file"
+                      
+                      +
+                      │
+                      ↓
+              memory_addr *
+                      │
+                      ↓
+                   ptr->loc
+                      │
+                      ↓
+                    int *
+                      │
+                      ↓
+              Shared counter/state
+
+So compared with your previous PROCESS_H, this library's main datatype combination is:
+
+char * for file paths/data + FILE * for actual file operations + memory_addr * for your shared-memory layer + sem_t * for synchronization.
