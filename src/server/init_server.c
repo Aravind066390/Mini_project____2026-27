@@ -24,5 +24,6 @@ Strings *s1=new Strings(str,n);
 while(i<n){
 i+=route(s1);
 }
+delete s1;
 return 0;
 }
