@@ -1,0 +1,328 @@
+Custom / important datatypes
+Datatype	Where used	What it means	What it stores	Purpose in your library
+proc	typedef struct proc	Custom process-record structure	Process ID, ID number, filename, next pointer	Represents one tracked process
+proc *	head_tracker, tail_tracker, function variables	Pointer to a proc	Address of a process record	Used to build and traverse the process linked list
+pid_t	proc.pid, process_add() etc.	POSIX process-ID datatype	A process identifier	Identifies the OS process created by fork()
+sem_t	sems, sent, gt	POSIX semaphore datatype	Semaphore state	Synchronizes access to shared memory/process data
+memory_addr	memory_addr *t	Custom datatype from your memory.h	Memory-space metadata/address information	Represents a shared-memory region
+memory_addr *	t	Pointer to memory_addr	Address of memory-space metadata	Used to access the shared memory region
+char *	Function parameters and memory operations	Pointer to characters	Strings / raw memory	Used for process names and memory manipulation
+struct proc *	proc.next	Pointer to another proc	Address of next process record	Creates the linked list
+pid_t *	*(pid_t *)t->loc	Pointer to a process ID stored in memory	Location containing a pid_t	Reads/writes process IDs from/to shared memory
+sem_t *	sent, gt	Pointer to a semaphore	Semaphore located in memory	Allows a semaphore to be placed inside shared memory
+proc structure
+
+Your main custom datatype is:
+
+typedef struct proc{
+    int i;
+    pid_t pid;
+    char f_name[124];
+    struct proc *next;
+}proc;
+Member	Datatype	Meaning	Purpose
+i	int	Internal process number	Gives each tracked process an index/ID
+pid	pid_t	Operating-system process ID	Identifies the actual process
+f_name	char[124]	Character array	Stores executable/file name
+next	struct proc *	Pointer to another proc	Links this process to the next process
+
+The structure is essentially:
+
+proc
+├── i          → internal ID
+├── pid        → OS PID
+├── f_name[]   → process/executable name
+└── next ─────→ next proc
+proc *
+
+You have:
+
+proc *head_tracker=NULL,*tail_tracker=NULL;
+
+These are pointers to your proc structures.
+
+They form a linked list of tracked processes.
+
+Pointer	Purpose
+head_tracker	Points to the first process record
+tail_tracker	Points to the last process record
+proces	Points to a newly allocated process record
+point	Traverses/searches the process list
+back_tr	Keeps track of the previous node
+v	Traverses the process list
+news	Used while modifying the list
+next_trac	Used to find the latest process ID
+
+For example:
+
+head_tracker
+     │
+     ↓
+ ┌─────────────┐
+ │ proc        │
+ │ i = 0       │
+ │ pid = 1234  │
+ │ next ───────┼─────┐
+ └─────────────┘     │
+                     ↓
+                ┌─────────────┐
+                │ proc        │
+                │ i = 1       │
+                │ pid = 1235  │
+                │ next ───────┼──→ NULL
+                └─────────────┘
+                              ↑
+                         tail_tracker
+pid_t
+
+This is an important POSIX datatype:
+
+pid_t pid;
+
+It is used for process IDs.
+
+For example:
+
+pid_t pids;
+pids = fork();
+
+After fork():
+
+fork() result	Meaning
+0	You are inside the child process
+> 0	You are inside the parent; value is child's PID
+< 0	fork() failed
+
+You store the child's PID here:
+
+tail_tracker->pid=pids;
+
+So your structure connects your own process record to the actual OS process:
+
+proc
+ │
+ └── pid
+      ↓
+   OS process
+sem_t
+
+You declare:
+
+sem_t sems;
+
+sem_t is a POSIX semaphore datatype.
+
+It represents a synchronization object.
+
+Variable	Type	Purpose
+sems	sem_t	Global semaphore
+sent	sem_t *	Semaphore stored inside shared memory
+gt	sem_t *	Semaphore associated with shared-memory update
+
+You use operations such as:
+
+sem_init()
+sem_wait()
+sem_post()
+sem_destroy()
+
+Conceptually:
+
+sem_wait()
+   ↓
+lock/access control
+   ↓
+critical section
+   ↓
+sem_post()
+   ↓
+release
+memory_addr *
+
+You use:
+
+memory_addr *t=find_space(x);
+
+memory_addr comes from your own memory.h library.
+
+In this code, t is used to access the shared-memory region:
+
+t->loc
+
+So:
+
+memory_addr
+├── metadata
+└── loc ─────→ shared memory
+
+The important point is that PROCESS_H is using the datatype supplied by your memory-management library rather than directly managing the shared-memory mapping itself.
+
+char *
+
+You use char * in several functions:
+
+int add_track(int a,char *s)
+int process_create(char *s)
+int process_kill(char *s)
+int process_add(pid_t a,char *s)
+
+Here s represents a string such as:
+
+"/bin/ls"
+
+or another executable/file name.
+
+You copy it into:
+
+strcpy(proces->f_name,s);
+
+So:
+
+char *
+  ↓
+"/some/program"
+  ↓
+proc.f_name
+char[124]
+
+Inside proc:
+
+char f_name[124];
+
+This is a fixed-size character array.
+
+Property	Meaning
+Type	char
+Size	124 characters
+Used for	Process/executable filename
+Storage	Inside the proc structure itself
+
+Unlike:
+
+char *f_name;
+
+your f_name does not require a separate malloc().
+
+Each proc automatically contains 124 bytes for the filename.
+
+struct proc *next
+
+This member:
+
+struct proc *next;
+
+is what makes proc a linked-list datatype.
+
+next value	Meaning
+Address of another proc	Another process exists after this one
+NULL	This is the last process
+
+Your list therefore becomes:
+
+proc → proc → proc → proc → NULL
+Datatypes involved in shared-memory processing
+
+Your process_init() introduces another interesting use of datatypes.
+
+memory_addr *t=find_space(x);
+
+Then:
+
+sem_t *sent=(sem_t *)t->loc;
+
+Here you're treating the beginning of the shared-memory region as a sem_t.
+
+Then:
+
+t->loc=((char *)t->loc)+sizeof(sem_t);
+
+moves past the semaphore.
+
+The memory layout is effectively:
+
+Shared memory
+┌──────────────────────────┐
+│ sem_t                    │
+├──────────────────────────┤
+│ pid_t                    │
+├──────────────────────────┤
+│ filename                 │
+├──────────────────────────┤
+│ pid_t                    │
+├──────────────────────────┤
+│ filename                 │
+├──────────────────────────┤
+│ ...                      │
+└──────────────────────────┘
+
+So your code is using type casting to interpret different portions of the same memory region as different datatypes.
+
+Datatypes used in update()
+
+This line:
+
+*((pid_t *)t->loc)=te->pid;
+
+is particularly important.
+
+Expression	Datatype	Meaning
+t->loc	void * / memory pointer from your library	Current location in shared memory
+(pid_t *)t->loc	pid_t *	Treat that location as a pointer to a PID
+*((pid_t *)t->loc)	pid_t	Actual PID stored at that location
+te->pid	pid_t	PID being written
+
+So:
+
+raw memory address
+       ↓
+   cast to pid_t *
+       ↓
+   dereference
+       ↓
+      pid_t
+Overall datatype architecture
+Layer	Datatype	Role
+Process tracking	proc	Represents one tracked process
+Process tracking	proc *	Links process records
+OS process	pid_t	Identifies an actual Linux process
+Process name	char[124]	Stores executable name
+Synchronization	sem_t	Provides locking/synchronization
+Synchronization	sem_t *	Points to semaphore in memory
+Memory system	memory_addr	Represents your memory-space metadata
+Memory system	memory_addr *	Accesses the memory-space object
+Raw memory	char *	Used for byte-wise pointer movement
+Shared PID	pid_t *	Interprets shared memory as a PID location
+Overall structure of your library
+                 PROCESS SYSTEM
+                       │
+                       ↓
+                    proc *
+                       │
+                       ↓
+                    proc
+              ┌────────┼────────┐
+              ↓        ↓        ↓
+             int     pid_t    char[124]
+              │        │        │
+          track ID    PID    executable
+                       │
+                       ↓
+                  Linux process
+
+                       +
+                       │
+                       ↓
+                 memory_addr *
+                       │
+                       ↓
+                 Shared memory
+                       │
+             ┌─────────┴─────────┐
+             ↓                   ↓
+           sem_t               pid_t
+        synchronization      process ID
+                                  │
+                                  ↓
+                              char data
+
+The central custom datatype here is proc. It combines your own process-tracking information (i, f_name, next) with the operating system's process identifier (pid_t). The linked proc * structures then form your process table, while memory_addr, pid_t, and sem_t allow that process information to be synchronized and shared across processes.
