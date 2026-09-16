@@ -1,0 +1,243 @@
+Custom / newly introduced datatypes
+Datatype	Where used	What it means	What it stores	Purpose in your library
+pool	class pool	Custom C++ class	A std::thread object	Represents a thread execution object
+promise	typedef struct promise	Custom C structure/type	next, promise_ID, value	Represents a handle/reference to an asynchronous task
+promise *	promise *head, promise *temp, function returns	Pointer to a promise	Address of a promise node	Used to create and traverse the promise linked list
+pool *	promise.value, async()	Pointer to a pool object	Address of a thread pool object	Connects a promise to the thread executing its task
+std::thread	pool.t1	C++ standard-library thread type	A running/thread-managed execution context	Actually executes the submitted function
+make_promise	class make_promise	Custom C++ class	Internally creates/initializes a promise	Automates promise creation
+T	submit() / async()	Template type parameter	Any callable/function type	Allows different function types to be submitted
+Args...	submit() / async()	Variadic template parameter pack	Zero or more argument types	Allows functions with arbitrary arguments
+pool class
+class pool{
+    std::thread t1;
+    ...
+};
+Member	Datatype	Meaning
+t1	std::thread	Thread associated with the submitted task
+submit()	Function template	Starts a new thread
+~pool()	Destructor	Joins the thread before destroying the object
+
+The important distinction is that pool is your datatype, while std::thread is the actual C++ standard-library datatype doing the thread execution.
+
+Conceptually:
+
+pool
+ │
+ └── t1
+      │
+      └── std::thread
+           │
+           └── executes submitted function
+promise structure
+
+You define:
+
+typedef struct promise{
+    promise *next;
+    int promise_ID;
+    pool *value;
+}promise;
+Member	Datatype	Purpose
+next	promise *	Points to the next promise in the linked list
+promise_ID	int	Identifies the asynchronous task
+value	pool *	Points to the pool containing the task's thread
+
+The structure is therefore:
+
+promise
+ │
+ ├── promise_ID → task ID
+ │
+ ├── value ─────→ pool
+ │                    │
+ │                    └── std::thread
+ │
+ └── next ──────────→ next promise
+promise *
+
+You use:
+
+promise *head=NULL,*temp=NULL;
+
+These are pointers to promise objects.
+
+They form a linked list:
+
+head
+ │
+ ↓
+promise #0
+ │
+ ↓ next
+promise #1
+ │
+ ↓ next
+promise #2
+ │
+ ↓
+NULL
+Pointer	Purpose
+head	Points to the first promise
+temp	Points to the most recently created promise
+beg	Temporary pointer used while searching
+backe	Keeps track of the previous promise
+pool *
+
+This appears in:
+
+promise *value;
+
+and:
+
+pool *A=new pool();
+
+So your relationship is:
+
+promise
+   │
+   └── value
+        ↓
+       pool
+        │
+        └── t1
+             ↓
+        std::thread
+
+This is important because the promise does not directly contain the thread.
+
+Instead:
+
+promise → pool → std::thread
+
+The promise therefore acts as a reference/handle to the asynchronous operation.
+
+make_promise
+class make_promise
+
+This is another custom C++ datatype.
+
+Function/member	Purpose
+generate_promise()	Allocates a new promise and inserts it into the linked list
+init_promise()	Assigns the ID and pool pointer
+make_promise()	Constructor that creates and initializes a promise
+
+It essentially combines:
+
+allocate promise
+      ↓
+put it in linked list
+      ↓
+assign ID
+      ↓
+attach pool
+Template datatypes: T and Args...
+
+Your function:
+
+template <typename T,typename... Args>
+int submit(T value,Args... vals)
+
+introduces template parameters rather than fixed datatypes.
+
+Template	Meaning
+T	Type of the function/callable being submitted
+Args...	Types of all arguments passed to that function
+vals...	Actual argument values
+
+For example, if you call:
+
+A->submit(calc, 100);
+
+the compiler can conceptually determine:
+
+T       → type of calc
+Args... → int
+
+This allows your submit() function to work with different functions and argument lists.
+
+async()
+template <typename T,typename... Args>
+promise* async(T value1,Args... value2)
+Input/Output	Datatype	Purpose
+value1	T	Function/callable to execute
+value2...	Args...	Arguments for that function
+A	pool *	Dynamically created thread object
+A1	make_promise *	Temporary promise creator
+Return	promise *	Handle to the asynchronous operation
+
+The datatype flow is:
+
+async(function, arguments)
+          │
+          ↓
+       pool *
+          │
+          ↓
+     std::thread
+          │
+          ↓
+   make_promise
+          │
+          ↓
+      promise *
+          │
+          ↓
+      returned
+await()
+int await(promise *A)
+Parameter	Datatype	Meaning
+A	promise *	Promise/async-task handle supplied by the caller
+beg	promise *	Current node during linked-list traversal
+backe	promise *	Previous node
+
+The function uses the promise * to locate the corresponding asynchronous task:
+
+await(promise)
+       │
+       ↓
+ search linked list
+       │
+       ↓
+ find matching promise
+       │
+       ↓
+ A->value
+       │
+       ↓
+ delete pool
+       │
+       ↓
+ thread destructor
+       │
+       ↓
+ join()
+Overall datatype hierarchy
+Level	Datatype	Represents
+1	promise *	User-visible handle to an async task
+2	promise	Task metadata + link to execution object
+3	pool *	Execution object associated with the promise
+4	pool	Your wrapper around a thread
+5	std::thread	Actual C++ thread object
+6	T	Type of submitted callable
+7	Args...	Types of callable arguments
+
+So the main new datatype introduced by your library is promise, while pool and make_promise are C++ classes that organize the thread and promise management.
+
+The central relationship is:
+
+promise *
+    │
+    ↓
+ promise
+    │
+    └── pool *
+           │
+           ↓
+          pool
+           │
+           └── std::thread
+
+This makes your library's abstraction essentially:
+
+async() → creates a pool → starts a std::thread → creates a promise → returns promise * → await() uses that promise to locate and clean up the task.
