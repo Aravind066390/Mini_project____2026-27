@@ -1,0 +1,6 @@
+File	         Main responsibility
+buffer.h     	 Manages shared memory, buffers, ownership and read/write access
+memory.h	     Provides the underlying memory-space operations used by the other modules
+XDP/eBPF code  Processes network packets efficiently and with low latency
+vid.h	         Handles media streaming and downloading
+logs.h      	 Records application events and timestamps
