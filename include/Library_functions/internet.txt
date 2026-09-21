@@ -1,0 +1,1275 @@
+This is a small C++ wrapper around Linux TCP sockets. Its purpose is to hide the low-level socket API (socket(), connect(), bind(), listen(), accept(), send(), recv()) behind a simple Socket class.
+
+The important idea is:
+
+Your program
+    ↓
+Socket class
+    ↓
+Linux socket API
+    ↓
+TCP/IP
+    ↓
+Network
+
+So instead of writing 30–50 lines of socket code every time, you can do:
+
+Socket client;
+client.connect_to("127.0.0.1", 8080);
+client.put_file("ABC.mp4");
+
+and on the server:
+
+Socket server;
+server.listen_on(8080);
+
+Socket client = server.accept_client();
+
+client.get_file("received.mp4");
+
+Let's go through exactly how your library works.
+
+1. Header guard
+#ifndef SIMPLE_SOCKET_H
+#define SIMPLE_SOCKET_H
+
+and at the bottom:
+
+#endif
+
+This prevents the header from being included multiple times.
+
+For example:
+
+#include "simple_socket.h"
+#include "simple_socket.h"
+
+Without the guard, the compiler could see the Socket class twice.
+
+The guard effectively says:
+
+Has SIMPLE_SOCKET_H already been defined?
+        |
+       NO
+        ↓
+Define it and process the file
+        |
+       YES
+        ↓
+Ignore the file
+2. Included libraries
+#include <sys/socket.h>
+
+This provides the main Linux socket functions:
+
+socket()
+bind()
+listen()
+accept()
+connect()
+send()
+recv()
+setsockopt()
+#include <arpa/inet.h>
+
+Used for IP address handling:
+
+inet_pton()
+htons()
+
+For example:
+
+inet_pton(AF_INET, "192.168.1.10", &addr.sin_addr);
+
+converts the text IP address into binary form.
+
+#include <unistd.h>
+
+Provides:
+
+close()
+
+which closes the socket file descriptor.
+
+#include <cstdio>
+
+Used for file operations:
+
+FILE
+fopen()
+fread()
+fwrite()
+fseek()
+ftell()
+rewind()
+fclose()
+#include <cstring>
+#include <string>
+
+These aren't actually needed by the current implementation.
+
+You could remove them for this version.
+
+3. The Socket class
+class Socket{
+    int fd = -1;
+
+This is the heart of the library.
+
+fd means file descriptor.
+
+Linux represents sockets using file descriptors.
+
+For example:
+
+fd = -1
+
+means:
+
+No socket currently exists
+
+After:
+
+fd = socket(AF_INET, SOCK_STREAM, 0);
+
+you might get:
+
+fd = 3
+
+That means Linux has created a socket and assigned descriptor 3.
+
+Conceptually:
+
+Socket object
+     |
+     +---- fd = 3
+              |
+              ↓
+       Linux kernel socket
+              |
+              ↓
+           TCP/IP
+4. Why fd is private
+
+Because you don't want the user of your library to directly manipulate it.
+
+Instead of:
+
+send(fd, ...)
+recv(fd, ...)
+close(fd)
+
+you provide:
+
+put(...)
+get(...)
+close_socket()
+
+This is encapsulation.
+
+Your library is essentially saying:
+
+"You don't need to know how the Linux socket descriptor works. Just tell me what you want to send or receive."
+
+5. send_all()
+
+This is one of the most important parts.
+
+bool send_all(const void *data,size_t size)
+
+You might think:
+
+send(fd, data, size, 0);
+
+means the entire size bytes are guaranteed to be sent.
+
+It does not.
+
+For example:
+
+send(fd, buffer, 10000, 0);
+
+might send only:
+
+6000 bytes
+
+and return:
+
+6000
+
+So your library handles this.
+
+The pointer
+const char *ptr = (const char *)data;
+
+Suppose:
+
+data
+ ↓
++--------------------------------+
+| A B C D E F G H I J ...       |
++--------------------------------+
+
+ptr points to the current position.
+
+Loop
+while (size > 0)
+
+Keep sending until everything has been sent.
+
+ssize_t n = send(fd, ptr, size, 0);
+
+Suppose:
+
+requested = 10000
+send() = 4000
+
+Then:
+
+ptr += n;
+size -= n;
+
+becomes:
+
+requested remaining = 6000
+ptr = original + 4000
+
+So the next call starts exactly where the previous call stopped.
+
+Eventually:
+
+10000
+ ↓
+4000 sent
+ ↓
+6000 remaining
+ ↓
+4000 sent
+ ↓
+2000 remaining
+ ↓
+2000 sent
+ ↓
+0 remaining
+
+Then:
+
+return true;
+6. recv_all()
+
+This is basically the reverse.
+
+bool recv_all(void *data, size_t size)
+
+It guarantees that your function doesn't return until the requested number of bytes has been received, or an error occurs.
+
+For example:
+
+recv_all(buffer, 10000);
+
+may internally do:
+
+recv → 3000
+recv → 4000
+recv → 3000
+
+Total:
+
+10000 bytes
+
+Then it returns true.
+
+This is extremely important with TCP.
+
+7. TCP does NOT preserve message boundaries
+
+This is an important concept for understanding your library.
+
+If the sender does:
+
+send(fd, "HELLO", 5, 0);
+send(fd, "WORLD", 5, 0);
+
+TCP does not necessarily deliver:
+
+HELLO
+WORLD
+
+It could arrive as:
+
+HELLOWORLD
+
+or:
+
+HEL
+LOWOR
+LD
+
+or another segmentation.
+
+TCP gives you a byte stream.
+
+Your send_all() and recv_all() functions solve part of this problem by explicitly specifying how many bytes need to be transferred.
+
+8. Constructor
+Socket() {}
+
+Nothing special happens when the object is created.
+
+Initially:
+
+fd = -1;
+
+So:
+
+Socket server;
+
+creates:
+
+server
+ |
+ +-- fd = -1
+9. Destructor
+~Socket() {
+    close_socket();
+}
+
+This is actually a nice C++ design.
+
+When the object disappears:
+
+{
+    Socket client;
+}
+
+the destructor automatically runs.
+
+Therefore:
+
+close_socket();
+
+is automatically called.
+
+This follows the C++ RAII idea.
+
+Instead of remembering:
+
+close(fd);
+
+everywhere, the class automatically closes the socket.
+
+10. Client: connect_to()
+bool connect_to(const char *ip, int port)
+
+This is used by a client.
+
+For example:
+
+Socket client;
+
+client.connect_to("127.0.0.1", 8080);
+Step 1: create socket
+fd = socket(AF_INET, SOCK_STREAM, 0);
+
+Break this down:
+
+AF_INET
+
+IPv4.
+
+192.168.1.10
+SOCK_STREAM
+
+TCP.
+
+So:
+
+socket(AF_INET, SOCK_STREAM, 0)
+
+means approximately:
+
+Create an IPv4 TCP socket.
+
+11. sockaddr_in
+sockaddr_in addr{};
+
+This structure stores the destination address.
+
+Then:
+
+addr.sin_family = AF_INET;
+
+means IPv4.
+
+addr.sin_port = htons(port);
+
+Suppose:
+
+port = 8080
+
+htons() converts the integer into network byte order.
+
+This is necessary because different architectures can represent multi-byte integers differently.
+
+12. Convert IP address
+inet_pton(AF_INET, ip, &addr.sin_addr)
+
+Suppose:
+
+ip = "192.168.1.50"
+
+This converts:
+
+"192.168.1.50"
+
+into the binary representation expected by the socket API.
+
+13. Connect
+
+Finally:
+
+connect(fd, (sockaddr *)&addr, sizeof(addr))
+
+This asks the kernel:
+
+Connect this TCP socket to this IP address and port.
+
+Conceptually:
+
+Client
+  |
+  | TCP connection request
+  |
+  ↓
+192.168.1.50:8080
+  |
+  ↓
+Server
+
+If successful:
+
+return true;
+14. Server: listen_on()
+
+This is the server equivalent.
+
+bool listen_on(int port, int backlog = 5)
+
+For:
+
+server.listen_on(8080);
+
+the following happens.
+
+Create socket
+fd = socket(AF_INET, SOCK_STREAM, 0);
+SO_REUSEADDR
+int opt = 1;
+
+setsockopt(
+    fd,
+    SOL_SOCKET,
+    SO_REUSEADDR,
+    &opt,
+    sizeof(opt)
+);
+
+This allows the server to reuse the address more conveniently after a previous connection.
+
+It's particularly useful during development.
+
+Without it, after restarting a server quickly, you can sometimes encounter:
+
+Address already in use
+15. Server address
+addr.sin_family = AF_INET;
+
+IPv4.
+
+addr.sin_addr.s_addr = INADDR_ANY;
+
+This is important.
+
+It means:
+
+Listen on the machine's available IPv4 interfaces.
+
+So the server isn't restricted to:
+
+127.0.0.1
+
+It can potentially accept connections through:
+
+localhost
+LAN interface
+other configured IPv4 interfaces
+
+depending on firewall/network configuration.
+
+addr.sin_port = htons(port);
+
+Set the port.
+
+16. bind()
+bind(fd, (sockaddr *)&addr, sizeof(addr))
+
+This associates the socket with:
+
+IP + port
+
+For example:
+
+0.0.0.0:8080
+
+Conceptually:
+
+Socket fd=3
+      |
+      ↓
+0.0.0.0:8080
+17. listen()
+listen(fd, backlog)
+
+This changes the socket into a listening socket.
+
+Before:
+
+ordinary TCP socket
+
+After:
+
+listening TCP socket
+
+The backlog parameter controls the queue of pending connections.
+
+Your default is:
+
+backlog = 5
+18. accept_client()
+
+Now:
+
+Socket accept_client()
+
+is called.
+
+Example:
+
+Socket client = server.accept_client();
+
+Internally:
+
+client.fd = accept(fd, nullptr, nullptr);
+
+This is extremely important.
+
+The server has:
+
+server.fd
+     |
+     ↓
+LISTENING SOCKET
+
+When a client connects:
+
+Client
+   |
+   | TCP connection
+   ↓
+server.fd
+
+accept() creates a new socket for that specific connection:
+
+server.fd
+   |
+   +---- listening socket
+   |
+   +---- client.fd
+
+So:
+
+server
+  fd=3
+   |
+   | listening
+   |
+   +---------------- client
+                         fd=4
+
+The server continues listening on fd=3.
+
+The actual communication with the client happens through fd=4.
+
+19. put()
+bool put(const void *data, size_t size) {
+    return send_all(data, size);
+}
+
+This is simply a friendly wrapper.
+
+You can do:
+
+char msg[] = "Hello";
+
+client.put(msg, sizeof(msg));
+
+Internally:
+
+put()
+ ↓
+send_all()
+ ↓
+send()
+ ↓
+Linux kernel
+ ↓
+TCP
+20. get()
+
+Same concept:
+
+bool get(void *data, size_t size) {
+    return recv_all(data, size);
+}
+
+Example:
+
+char buffer[100];
+
+client.get(buffer, sizeof(buffer));
+
+Internally:
+
+get()
+ ↓
+recv_all()
+ ↓
+recv()
+ ↓
+Linux kernel
+ ↓
+TCP
+21. The interesting part: put_file()
+
+This is where your library becomes more useful.
+
+bool put_file(const char *filename)
+
+Suppose:
+
+client.put_file("ABC.mp4");
+
+The library transfers the file over TCP.
+
+Step 1: open file
+FILE *fp = fopen(filename, "rb");
+
+rb means:
+
+r = read
+b = binary
+
+So:
+
+ABC.mp4
+     ↓
+opened for binary reading
+22. Determine file size
+fseek(fp, 0, SEEK_END);
+
+Move to the end.
+
+Then:
+
+uint64_t size = ftell(fp);
+
+gets the position.
+
+Since we're at the end:
+
+position = file size
+
+Then:
+
+rewind(fp);
+
+moves back to the beginning.
+
+For example:
+
+ABC.mp4
+0                         100 MB
+|----------------------------|
+↑                            ↑
+rewind                    ftell()
+
+So:
+
+size = 100 MB
+23. Send the size first
+
+This is a very important design decision:
+
+send_all(&size, sizeof(size))
+
+Before sending the actual file, you send:
+
+FILE SIZE
+
+For example:
+
+8 bytes
+
+representing:
+
+104857600
+
+Then the receiver knows exactly how many bytes it must receive.
+
+Your protocol is therefore essentially:
+
++------------------+
+| uint64_t size    |
++------------------+
+|                  |
+| file data        |
+|                  |
+|                  |
++------------------+
+
+This is your own simple application-layer protocol.
+
+24. Why 8192?
+char buffer[8192];
+
+You read the file in chunks.
+
+Instead of:
+
+Load entire 2 GB file into RAM
+
+you do:
+
+8 KB
+ ↓
+send
+ ↓
+8 KB
+ ↓
+send
+ ↓
+8 KB
+ ↓
+send
+
+So memory usage stays small.
+
+For example:
+
+ABC.mp4
+   |
+   ↓
++--------+
+| 8192 B |
++--------+
+   |
+   ↓
+send()
+   |
+   ↓
++--------+
+| 8192 B |
++--------+
+   |
+   ↓
+send()
+25. Read chunk
+size_t chunk =
+    size > sizeof(buffer) ? sizeof(buffer) : size;
+
+Suppose:
+
+remaining = 100000
+
+then:
+
+chunk = 8192
+
+Eventually:
+
+remaining = 5000
+
+then:
+
+chunk = 5000
+
+This prevents reading beyond the end of the file.
+
+26. Read from disk
+size_t n = fread(buffer, 1, chunk, fp);
+
+Data moves:
+
+Disk
+ ↓
+FILE *
+ ↓
+buffer[8192]
+
+Then:
+
+send_all(buffer, n);
+
+moves it:
+
+buffer
+ ↓
+socket
+ ↓
+TCP
+ ↓
+network
+27. The complete put_file() pipeline
+
+Your program is effectively doing:
+
+              SENDER
+
+       ABC.mp4 on disk
+              |
+              | fread()
+              ↓
+        RAM buffer 8192
+              |
+              | send()
+              ↓
+       Linux socket
+              |
+              ↓
+            TCP
+              |
+              ↓
+           Network
+
+and repeatedly.
+
+28. get_file()
+
+The receiver does the reverse.
+
+bool get_file(const char *filename)
+
+For example:
+
+server_client.get_file("received.mp4");
+Open destination
+FILE *fp = fopen(filename, "wb");
+
+wb means:
+
+write binary
+29. Receive file size
+uint64_t size;
+
+recv_all(&size, sizeof(size));
+
+The receiver first receives the size that the sender sent.
+
+So if sender says:
+
+104857600 bytes
+
+the receiver knows:
+
+I need exactly 104857600 bytes.
+30. Receive chunks
+char buffer[8192];
+
+Then:
+
+recv_all(buffer, chunk);
+
+Data comes:
+
+Network
+   ↓
+TCP
+   ↓
+socket
+   ↓
+buffer[8192]
+
+Then:
+
+fwrite(buffer, 1, chunk, fp);
+
+writes:
+
+buffer
+ ↓
+FILE
+ ↓
+received.mp4
+31. Complete file transfer
+
+Putting both sides together:
+
+              CLIENT
+              
+ ABC.mp4
+    |
+    | fread()
+    ↓
+  buffer
+    |
+    | send()
+    ↓
+  TCP socket
+    |
+    |================ NETWORK ================|
+                                              |
+                                              ↓
+                                        TCP socket
+                                              |
+                                              ↓
+                                           buffer
+                                              |
+                                              | fwrite()
+                                              ↓
+                                      received.mp4
+              
+              SERVER
+
+And before the data:
+
+CLIENT                         SERVER
+
+uint64_t size
+      |
+      |----------------------->|
+      |                        |
+file data                      |
+      |----------------------->|
+      |----------------------->|
+      |----------------------->|
+32. Why the file doesn't get corrupted by TCP packet boundaries
+
+This is another important concept.
+
+Suppose your 8192-byte chunk is internally split by TCP:
+
+send_all()
+   |
+   +---- TCP packet 1: 1460
+   +---- TCP packet 2: 1460
+   +---- TCP packet 3: 1460
+   +---- ...
+
+The receiver doesn't care.
+
+Your:
+
+recv_all(buffer, 8192)
+
+keeps calling:
+
+recv()
+
+until 8192 bytes have arrived.
+
+Therefore the application sees:
+
+8192 bytes
+
+even though the network may have transmitted them as multiple packets.
+
+That's one of the main reasons recv_all() is necessary.
+
+33. Your library's protocol
+
+You have actually created a very simple protocol.
+
+For put_file():
+
++-------------------------+
+| uint64_t file_size      |
+| 8 bytes                 |
++-------------------------+
+|                         |
+| file bytes              |
+| file_size bytes         |
+|                         |
++-------------------------+
+
+The receiver follows the exact same protocol:
+
+receive 8 bytes
+       ↓
+interpret as file size
+       ↓
+receive file_size bytes
+       ↓
+write them to disk
+
+This is why sender and receiver must agree.
+
+For example, this will work:
+
+// sender
+client.put_file("ABC.mp4");
+
+with:
+
+// receiver
+client.get_file("received.mp4");
+
+because both understand the same protocol.
+
+34. One subtle issue: byte order of uint64_t
+
+Your current code does:
+
+send_all(&size, sizeof(size));
+
+and:
+
+recv_all(&size, sizeof(size));
+
+This works when both machines use the same representation, which is common today.
+
+But technically, you're sending the raw machine representation.
+
+For a robust cross-platform protocol, you'd encode the integer into a defined byte order.
+
+For example, your protocol could explicitly define:
+
+file size = 64-bit unsigned integer, network byte order
+
+Your current implementation doesn't do that.
+
+For a project running between your own Linux machines, this is usually not an immediate problem, but it's an important limitation to understand.
+
+35. Another important issue: error handling
+
+You have:
+
+if (inet_pton(...) <= 0)
+    return false;
+
+and:
+
+if (connect(...) < 0)
+    return false;
+
+That's good as a basic implementation.
+
+But there is a problem:
+
+return false;
+
+doesn't close the socket that was already created.
+
+For example:
+
+fd = socket(...);
+
+if (connect(...) < 0)
+    return false;
+
+If connect() fails, fd remains open until the destructor eventually runs.
+
+It's not catastrophic for a short-lived object, but it is cleaner to call:
+
+close_socket();
+return false;
+
+in failure paths.
+
+Same issue exists in listen_on() after bind() or listen() fails.
+
+36. Another important C++ issue: copying Socket
+
+This is actually the biggest design issue I'd fix before calling this a robust C++ socket library.
+
+You have:
+
+Socket accept_client() {
+    Socket client;
+    client.fd = accept(fd, nullptr, nullptr);
+    return client;
+}
+
+And the class owns a raw file descriptor.
+
+The problem is that raw file descriptors behave differently from ordinary C++ values.
+
+You should eventually make Socket move-only:
+
+Socket(const Socket&) = delete;
+Socket& operator=(const Socket&) = delete;
+
+Socket(Socket&& other) noexcept;
+Socket& operator=(Socket&& other) noexcept;
+
+Then ownership becomes explicit.
+
+Conceptually:
+
+Socket A
+   |
+   fd=4
+   |
+   ↓ move
+Socket B
+   |
+   fd=4
+
+A → fd=-1
+B → fd=4
+
+This is especially important as your library gets bigger.
+
+37. One thing your library does NOT currently do
+
+It doesn't provide:
+
+encryption
+authentication
+compression
+checksums
+timeouts
+non-blocking I/O
+TLS
+IPv6
+UDP
+parallel transfer
+zero-copy transfer
+resume
+progress reporting
+
+It is fundamentally:
+
+IPv4 + TCP + blocking I/O
+
+which is perfectly reasonable for a simple socket abstraction.
+
+38. Your library architecture
+
+You can think of it as four layers:
+
+┌─────────────────────────────────────┐
+│           Your application          │
+│                                     │
+│ put_file("ABC.mp4")                 │
+│ get_file("received.mp4")            │
+└──────────────────┬──────────────────┘
+                   │
+                   ↓
+┌─────────────────────────────────────┐
+│           Socket class              │
+│                                     │
+│ put()       get()                   │
+│ put_file()  get_file()              │
+└──────────────────┬──────────────────┘
+                   │
+                   ↓
+┌─────────────────────────────────────┐
+│        Linux socket API             │
+│                                     │
+│ socket() connect() bind()           │
+│ listen() accept() send() recv()     │
+└──────────────────┬──────────────────┘
+                   │
+                   ↓
+┌─────────────────────────────────────┐
+│          Linux kernel               │
+│          TCP/IP stack               │
+└──────────────────┬──────────────────┘
+                   │
+                   ↓
+                Network
+39. Example usage
+Server
+#include "simple_socket.h"
+
+int main() {
+
+    Socket server;
+
+    if (!server.listen_on(8080)) {
+        printf("Server failed\n");
+        return 1;
+    }
+
+    printf("Waiting...\n");
+
+    Socket client = server.accept_client();
+
+    printf("Client connected\n");
+
+    if (!client.get_file("received.mp4")) {
+        printf("File receive failed\n");
+        return 1;
+    }
+
+    printf("File received\n");
+}
+Client
+#include "simple_socket.h"
+
+int main() {
+
+    Socket client;
+
+    if (!client.connect_to("127.0.0.1", 8080)) {
+        printf("Connection failed\n");
+        return 1;
+    }
+
+    if (!client.put_file("ABC.mp4")) {
+        printf("File send failed\n");
+        return 1;
+    }
+
+    printf("File sent\n");
+}
+
+The sequence is:
+
+SERVER                         CLIENT
+
+listen_on()
+     |
+     |                         connect_to()
+     |<---------------------------|
+     |
+accept_client()
+     |
+     |===========================|
+     |       TCP connection      |
+     |===========================|
+     |
+get_file()                  put_file()
+     |                           |
+     |<---- file size -----------|
+     |<---- file data -----------|
+     |<---- file data -----------|
+     |<---- file data -----------|
+     |                           |
+received.mp4                ABC.mp4
+The most important concepts to understand
+
+If you're learning this library rather than just using it, I'd focus on these 8 concepts in this order:
+
+File descriptor — why fd represents the socket.
+socket() — creating the kernel socket.
+bind() + listen() + accept() — how a server works.
+connect() — how a client establishes the connection.
+TCP byte stream — why one send() doesn't equal one recv().
+send_all() / recv_all() — handling partial transfers.
+Your file-transfer protocol — size first, then file bytes.
+RAII + move semantics — how to make the C++ wrapper safely own the descriptor.
+
+Once you understand those, you basically understand what this entire header is doing.
+
+One particularly useful next step for your code would be to redesign Socket ownership and then add fork()-based multi-client handling, because that connects directly to the file-transfer program you were working on earlier.
