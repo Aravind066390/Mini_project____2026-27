@@ -79,6 +79,7 @@ return 1;
 return 0;
 }
 int double_write(double valor){
+//Creates a double type as input and int as output.
 if(validity(A,id)){
 *((double*)(A->ptr))=valor;
 return 1;
