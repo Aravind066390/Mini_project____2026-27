@@ -1,339 +1,717 @@
-```javascript
+/*
+ * =========================================================
+ * ZERO COPY DATA TRANSFER SYSTEM
+ * Frontend JavaScript
+ * =========================================================
+ *
+ * Backend API expected:
+ *
+ * GET  /api/users
+ * GET  /api/users/<username>/files
+ * POST /api/runner
+ *
+ * The browser cannot directly access:
+ *
+ * /APP/DATA/
+ *
+ * Therefore the backend must expose the filesystem
+ * through these API endpoints.
+ */
+
+
+/* =========================================================
+   GLOBAL STATE
+========================================================= */
+
 let selectedUser = null;
 
-function switchMode(mode) {
-    const oneOne = document.getElementById("oneOneSection");
-    const oneMany = document.getElementById("oneManySection");
-    const buttons = document.querySelectorAll(".mode-btn");
 
-    buttons.forEach(btn => btn.classList.remove("active"));
+/* =========================================================
+   MODE SWITCHING
+========================================================= */
+
+function switchMode(mode) {
+
+    const oneOneSection =
+        document.getElementById("oneOneSection");
+
+    const oneManySection =
+        document.getElementById("oneManySection");
+
+    const oneOneBtn =
+        document.getElementById("oneOneBtn");
+
+    const oneManyBtn =
+        document.getElementById("oneManyBtn");
+
 
     if (mode === "one-one") {
-        oneOne.style.display = "block";
-        oneMany.style.display = "none";
-        buttons[0].classList.add("active");
+
+        oneOneSection.classList.remove("hidden");
+
+        oneManySection.classList.add("hidden");
+
+        oneOneBtn.classList.add("active");
+
+        oneManyBtn.classList.remove("active");
 
         loadUsers();
-    } else {
-        oneOne.style.display = "none";
-        oneMany.style.display = "block";
-        buttons[1].classList.add("active");
+
+    }
+
+
+    else {
+
+        oneOneSection.classList.add("hidden");
+
+        oneManySection.classList.remove("hidden");
+
+        oneOneBtn.classList.remove("active");
+
+        oneManyBtn.classList.add("active");
+
     }
 }
 
 
-/* =========================
-   ONE-ONE : USERS
-   ========================= */
+/* =========================================================
+   LOAD USERS
+========================================================= */
 
 async function loadUsers() {
-    const userList = document.getElementById("userList");
-    const fileList = document.getElementById("fileList");
 
-    userList.innerHTML = "<p>Loading users...</p>";
-    fileList.innerHTML = "<p>Select a user to view files.</p>";
+    const userList =
+        document.getElementById("userList");
+
+    const userCount =
+        document.getElementById("userCount");
+
+
+    userList.innerHTML = `
+        <div class="loading">
+            Loading users...
+        </div>
+    `;
+
 
     try {
-        const response = await fetch("/api/users");
+
+        /*
+         * Backend should return:
+         *
+         * {
+         *     "users": [
+         *         "aravind",
+         *         "rahul",
+         *         "john"
+         *     ]
+         * }
+         */
+
+        const response =
+            await fetch("/api/users");
+
 
         if (!response.ok) {
             throw new Error("Failed to load users");
         }
 
-        const data = await response.json();
 
-        userList.innerHTML = "";
+        const data =
+            await response.json();
 
-        if (!data.users || data.users.length === 0) {
-            userList.innerHTML = "<p>No users found.</p>";
+
+        const users =
+            data.users || [];
+
+
+        userCount.textContent =
+            users.length;
+
+
+        if (users.length === 0) {
+
+            userList.innerHTML = `
+                <div class="empty-state">
+
+                    <div class="empty-icon">
+                        Ø
+                    </div>
+
+                    <h3>No users found</h3>
+
+                    <p>
+                        No user directories exist.
+                    </p>
+
+                </div>
+            `;
+
             return;
         }
 
-        data.users.forEach(username => {
-            const userButton = document.createElement("button");
 
-            userButton.className = "user-item";
-            userButton.textContent = username;
+        userList.innerHTML = "";
 
-            userButton.onclick = () => selectUser(username);
 
-            userList.appendChild(userButton);
+        users.forEach(username => {
+
+            const userElement =
+                document.createElement("div");
+
+
+            userElement.className =
+                "user-item";
+
+
+            userElement.dataset.username =
+                username;
+
+
+            userElement.innerHTML = `
+
+                <div class="user-icon">
+                    U
+                </div>
+
+                <div class="user-info">
+
+                    <div class="user-name">
+                        ${escapeHtml(username)}
+                    </div>
+
+                    <div class="user-path">
+                        /APP/DATA/${escapeHtml(username)}
+                    </div>
+
+                </div>
+
+            `;
+
+
+            userElement.addEventListener(
+                "click",
+                () => selectUser(username)
+            );
+
+
+            userList.appendChild(userElement);
+
         });
 
-    } catch (error) {
+    }
+
+
+    catch (error) {
+
         console.error(error);
-        userList.innerHTML = "<p>Unable to load users.</p>";
+
+
+        userList.innerHTML = `
+
+            <div class="empty-state">
+
+                <div class="empty-icon">
+                    !
+                </div>
+
+                <h3>Unable to load users</h3>
+
+                <p>
+                    Backend API is unavailable.
+                </p>
+
+            </div>
+
+        `;
+
+        userCount.textContent = "0";
     }
 }
 
 
-/* =========================
+/* =========================================================
    SELECT USER
-   ========================= */
+========================================================= */
 
-function selectUser(username) {
+async function selectUser(username) {
+
     selectedUser = username;
 
-    const userItems = document.querySelectorAll(".user-item");
 
-    userItems.forEach(item => {
-        item.classList.remove("active");
+    /*
+     * Highlight selected user.
+     */
 
-        if (item.textContent === username) {
-            item.classList.add("active");
-        }
-    });
+    document
+        .querySelectorAll(".user-item")
+        .forEach(item => {
+
+            item.classList.remove("active");
+
+            if (item.dataset.username === username) {
+                item.classList.add("active");
+            }
+
+        });
+
+
+    document.getElementById(
+        "selectedUserTitle"
+    ).textContent = username.toUpperCase();
+
 
     loadUserFiles(username);
 }
 
 
-/* =========================
+/* =========================================================
    LOAD USER FILES
-   ========================= */
+========================================================= */
 
 async function loadUserFiles(username) {
-    const fileList = document.getElementById("fileList");
 
-    fileList.innerHTML = "<p>Loading files...</p>";
+    const fileList =
+        document.getElementById("fileList");
+
+    const fileCount =
+        document.getElementById("fileCount");
+
+
+    fileList.innerHTML = `
+        <div class="loading">
+            Loading files...
+        </div>
+    `;
+
 
     try {
-        const response = await fetch(
-            `/api/users/${encodeURIComponent(username)}/files`
-        );
+
+        /*
+         * Backend should return:
+         *
+         * {
+         *     "files": [
+         *         {
+         *             "name": "video.mp4",
+         *             "size": 123456,
+         *             "type": "mp4"
+         *         }
+         *     ]
+         * }
+         */
+
+        const response =
+            await fetch(
+                `/api/users/${encodeURIComponent(username)}/files`
+            );
+
 
         if (!response.ok) {
             throw new Error("Failed to load files");
         }
 
-        const data = await response.json();
 
-        fileList.innerHTML = "";
+        const data =
+            await response.json();
 
-        if (!data.files || data.files.length === 0) {
-            fileList.innerHTML = "<p>No files found.</p>";
+
+        const files =
+            data.files || [];
+
+
+        fileCount.textContent =
+            files.length;
+
+
+        if (files.length === 0) {
+
+            fileList.innerHTML = `
+
+                <div class="empty-state">
+
+                    <div class="empty-icon">
+                        □
+                    </div>
+
+                    <h3>No files</h3>
+
+                    <p>
+                        This user's directory is empty.
+                    </p>
+
+                </div>
+
+            `;
+
             return;
         }
 
-        data.files.forEach(file => {
-            const row = document.createElement("div");
-            row.className = "file-item";
 
-            const info = document.createElement("div");
-            info.className = "file-info";
+        fileList.innerHTML = "";
 
-            const name = document.createElement("div");
-            name.className = "file-name";
-            name.textContent = file.name;
 
-            const size = document.createElement("div");
-            size.className = "file-size";
-            size.textContent = formatBytes(file.size);
+        files.forEach(file => {
 
-            info.appendChild(name);
-            info.appendChild(size);
+            const fileElement =
+                document.createElement("div");
 
-            const actions = document.createElement("div");
-            actions.className = "file-actions";
 
-            /* Download button */
-            const downloadButton = document.createElement("button");
-            downloadButton.textContent = "Download";
-            downloadButton.className = "download-btn";
+            fileElement.className =
+                "file-item";
 
-            downloadButton.onclick = () => {
-                downloadFile(username, file.name);
-            };
 
-            actions.appendChild(downloadButton);
+            const extension =
+                getExtension(file.name);
 
-            /* Play button for videos */
-            if (isVideo(file.name)) {
-                const playButton = document.createElement("button");
 
-                playButton.textContent = "▶ Play";
-                playButton.className = "play-btn";
+            fileElement.innerHTML = `
 
-                playButton.onclick = () => {
-                    playVideo(username, file.name);
-                };
+                <div class="file-icon">
+                    ${escapeHtml(extension)}
+                </div>
 
-                actions.appendChild(playButton);
-            }
+                <div class="file-details">
 
-            row.appendChild(info);
-            row.appendChild(actions);
+                    <div class="file-name">
+                        ${escapeHtml(file.name)}
+                    </div>
 
-            fileList.appendChild(row);
+                    <div class="file-meta">
+
+                        <span>
+                            ${formatBytes(file.size)}
+                        </span>
+
+                        <span>
+                            ${escapeHtml(file.type || "FILE")}
+                        </span>
+
+                    </div>
+
+                </div>
+
+                <button
+                    class="download-btn"
+                    onclick="downloadFile(
+                        '${escapeJs(username)}',
+                        '${escapeJs(file.name)}'
+                    )">
+
+                    Download
+
+                </button>
+
+            `;
+
+
+            fileList.appendChild(fileElement);
+
         });
 
-    } catch (error) {
+    }
+
+
+    catch (error) {
+
         console.error(error);
-        fileList.innerHTML = "<p>Unable to load files.</p>";
+
+
+        fileList.innerHTML = `
+
+            <div class="empty-state">
+
+                <div class="empty-icon">
+                    !
+                </div>
+
+                <h3>Unable to load files</h3>
+
+                <p>
+                    Could not communicate with backend.
+                </p>
+
+            </div>
+
+        `;
+
+        fileCount.textContent = "0";
     }
 }
 
 
-/* =========================
+/* =========================================================
    DOWNLOAD FILE
-   ========================= */
+========================================================= */
 
 function downloadFile(username, filename) {
+
     const url =
-        `/api/users/${encodeURIComponent(username)}/files/` +
-        `${encodeURIComponent(filename)}`;
+        `/api/users/${encodeURIComponent(username)}/files/${encodeURIComponent(filename)}`;
 
     window.open(url, "_blank");
 }
 
 
-/* =========================
-   PLAY VIDEO
-   ========================= */
+/* =========================================================
+   ONE-MANY APPLICATION RUNNER
+========================================================= */
 
-async function playVideo(username, filename) {
+document
+    .getElementById("runnerForm")
+    .addEventListener("submit", async function(event) {
 
-    try {
-        const response = await fetch("/api/play-video", {
-            method: "POST",
+        event.preventDefault();
 
-            headers: {
-                "Content-Type": "application/json"
-            },
 
-            body: JSON.stringify({
-                username: username,
-                filename: filename
-            })
-        });
+        const activity =
+            document.getElementById("activity").value;
 
-        const data = await response.json();
+        const url =
+            document.getElementById("url").value;
 
-        if (!response.ok) {
-            throw new Error(data.error || "Unable to start video");
+        const port =
+            document.getElementById("port").value;
+
+        const filename =
+            document.getElementById("filename").value;
+
+        const extraArgs =
+            document.getElementById("extraArgs").value;
+
+
+        const runButton =
+            document.getElementById("runBtn");
+
+        const output =
+            document.getElementById("runnerOutput");
+
+        const status =
+            document.getElementById("runnerStatus");
+
+
+        /*
+         * Show running state.
+         */
+
+        runButton.disabled = true;
+
+        status.textContent = "RUNNING";
+
+        status.className =
+            "runner-status running";
+
+
+        output.innerHTML = `
+
+            <div class="terminal-line">
+
+                <span class="terminal-prefix">
+                    $
+                </span>
+
+                <span>
+                    Starting application_runner...
+                </span>
+
+            </div>
+
+        `;
+
+
+        /*
+         * Create request for backend.
+         */
+
+        const requestData = {
+
+            activity: activity,
+
+            url: url,
+
+            port: port,
+
+            filename: filename,
+
+            extraArgs: extraArgs
+
+        };
+
+
+        try {
+
+            /*
+             * Backend endpoint:
+             *
+             * POST /api/runner
+             *
+             * The backend is responsible for
+             * executing application_runner.c.
+             */
+
+            const response =
+                await fetch("/api/runner", {
+
+                    method: "POST",
+
+                    headers: {
+                        "Content-Type":
+                            "application/json"
+                    },
+
+                    body:
+                        JSON.stringify(requestData)
+
+                });
+
+
+            const result =
+                await response.json();
+
+
+            if (!response.ok) {
+
+                throw new Error(
+                    result.error ||
+                    "Application failed"
+                );
+
+            }
+
+
+            /*
+             * Display application output.
+             */
+
+            output.innerHTML = `
+
+                <div class="terminal-line">
+
+                    <span class="terminal-prefix">
+                        $
+                    </span>
+
+                    <span>
+                        application_runner started
+                    </span>
+
+                </div>
+
+                <div class="terminal-line">
+
+                    <span>
+                        Activity:
+                        ${escapeHtml(activity)}
+                    </span>
+
+                </div>
+
+                <div class="terminal-line">
+
+                    <span>
+                        URL:
+                        ${escapeHtml(url)}
+                    </span>
+
+                </div>
+
+                <br>
+
+                <div class="terminal-line output-success">
+
+                    <span>
+                        ${escapeHtml(
+                            result.output ||
+                            "Application completed successfully."
+                        )}
+                    </span>
+
+                </div>
+
+            `;
+
+
+            status.textContent =
+                "COMPLETED";
+
         }
 
-        console.log("Video started:", data.output || data.message);
 
-    } catch (error) {
-        console.error(error);
-        alert("Unable to start video: " + error.message);
-    }
-}
+        catch (error) {
+
+            console.error(error);
 
 
-/* =========================
-   CHECK VIDEO FILE
-   ========================= */
+            status.textContent =
+                "ERROR";
 
-function isVideo(filename) {
-    const extension = getExtension(filename);
-
-    const videoExtensions = [
-        "mp4",
-        "mkv",
-        "avi",
-        "mov",
-        "webm",
-        "m4v",
-        "flv",
-        "wmv"
-    ];
-
-    return videoExtensions.includes(extension);
-}
+            status.className =
+                "runner-status error";
 
 
-/* =========================
-   ONE-MANY APPLICATION
-   ========================= */
+            output.innerHTML = `
 
-async function runApplication() {
+                <div class="terminal-line">
 
-    const activity =
-        document.getElementById("activity")?.value || "";
+                    <span class="terminal-prefix">
+                        $
+                    </span>
 
-    const url =
-        document.getElementById("url")?.value.trim() || "";
+                    <span class="output-error">
+                        Application failed
+                    </span>
 
-    const port =
-        document.getElementById("port")?.value.trim() || "";
+                </div>
 
-    const filename =
-        document.getElementById("filename")?.value.trim() || "";
+                <br>
 
-    const extraArgs =
-        document.getElementById("extraArgs")?.value.trim() || "";
+                <div class="terminal-line output-error">
 
-    const output =
-        document.getElementById("applicationOutput");
+                    <span>
+                        ${escapeHtml(error.message)}
+                    </span>
 
-    if (output) {
-        output.textContent = "Starting application...";
-    }
+                </div>
 
-    try {
+            `;
 
-        const response = await fetch("/api/runner", {
-            method: "POST",
-
-            headers: {
-                "Content-Type": "application/json"
-            },
-
-            body: JSON.stringify({
-                activity: activity,
-                url: url,
-                port: port,
-                filename: filename,
-                extraArgs: extraArgs
-            })
-        });
-
-        const data = await response.json();
-
-        if (!response.ok) {
-            throw new Error(data.error || "Application failed");
         }
 
-        if (output) {
-            output.textContent =
-                data.output || "Application completed.";
+
+        finally {
+
+            runButton.disabled = false;
+
         }
 
-    } catch (error) {
-
-        console.error(error);
-
-        if (output) {
-            output.textContent =
-                "ERROR: " + error.message;
-        }
-    }
-}
+    });
 
 
-/* =========================
-   HELPERS
-   ========================= */
+/* =========================================================
+   HELPER FUNCTIONS
+========================================================= */
 
 function getExtension(filename) {
 
-    const parts = filename.split(".");
+    const parts =
+        filename.split(".");
 
     if (parts.length < 2) {
-        return "";
+        return "FILE";
     }
 
-    return parts.pop().toLowerCase();
+    return parts
+        .pop()
+        .toUpperCase();
 }
 
 
 function formatBytes(bytes) {
 
-    if (bytes === 0) {
+    if (!bytes || bytes === 0) {
         return "0 B";
     }
+
 
     const units = [
         "B",
@@ -343,46 +721,63 @@ function formatBytes(bytes) {
         "TB"
     ];
 
+
     const index =
-        Math.floor(Math.log(bytes) / Math.log(1024));
+        Math.floor(
+            Math.log(bytes) /
+            Math.log(1024)
+        );
+
 
     return (
-        (bytes / Math.pow(1024, index)).toFixed(2)
+        parseFloat(
+            (bytes /
+             Math.pow(1024, index))
+            .toFixed(2)
+        )
         + " "
         + units[index]
     );
 }
 
 
-/* =========================
-   SAFE HTML HELPERS
-   ========================= */
+/*
+ * Prevent HTML injection when displaying
+ * filenames/usernames returned by backend.
+ */
 
 function escapeHtml(value) {
 
-    const div = document.createElement("div");
-
-    div.textContent = value;
-
-    return div.innerHTML;
+    return String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
 }
 
+
+/*
+ * Used inside onclick attributes.
+ */
 
 function escapeJs(value) {
 
     return String(value)
-        .replace(/\\/g, "\\\\")
-        .replace(/'/g, "\\'");
+        .replaceAll("\\", "\\\\")
+        .replaceAll("'", "\\'");
 }
 
 
-/* =========================
-   START
-   ========================= */
+/* =========================================================
+   INITIALIZATION
+========================================================= */
 
-document.addEventListener("DOMContentLoaded", () => {
+document.addEventListener(
+    "DOMContentLoaded",
+    () => {
 
-    loadUsers();
+        loadUsers();
 
-});
-```
+    }
+);
