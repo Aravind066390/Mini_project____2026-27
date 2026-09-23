@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>High Data, Zero-Copy Sharing & Transfer</title>
+
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+    <!-- =========================
+         TOP NAVIGATION
+    ========================== -->
+
+    <header class="topbar">
+
+        <div class="brand">
+            <div class="brand-icon">Z</div>
+
+            <div>
+                <h1>ZShare</h1>
+                <span>High Data, Zero-Copy Sharing & Transfer</span>
+            </div>
+        </div>
+
+        <div class="status">
+            <span class="status-dot"></span>
+            SYSTEM ONLINE
+        </div>
+
+    </header>
+
+
+    <!-- =========================
+         MAIN APPLICATION
+    ========================== -->
+
+    <main class="container">
+
+        <!-- =========================
+             MODE SELECTOR
+        ========================== -->
+
+        <section class="mode-selector">
+
+            <button
+                class="mode-btn active"
+                id="oneOneBtn"
+                onclick="switchMode('one-one')">
+
+                <span class="mode-number">01</span>
+
+                <div>
+                    <strong>One-One</strong>
+                    <small>Host to Host</small>
+                </div>
+
+            </button>
+
+
+            <button
+                class="mode-btn"
+                id="oneManyBtn"
+                onclick="switchMode('one-many')">
+
+                <span class="mode-number">02</span>
+
+                <div>
+                    <strong>One-Many</strong>
+                    <small>Internet Distribution</small>
+                </div>
+
+            </button>
+
+        </section>
+
+
+        <!-- =========================
+             ONE-ONE SYSTEM
+        ========================== -->
+
+        <section id="oneOneSection" class="mode-section">
+
+            <div class="section-header">
+
+                <div>
+                    <p class="eyebrow">HOST TO HOST</p>
+
+                    <h2>Local User Storage</h2>
+
+                    <p class="description">
+                        Select a user to view the files stored
+                        inside their data directory.
+                    </p>
+                </div>
+
+                <button
+                    class="refresh-btn"
+                    onclick="loadUsers()">
+
+                    ↻ Refresh
+                </button>
+
+            </div>
+
+
+            <div class="storage-layout">
+
+                <!-- USERS -->
+
+                <div class="panel users-panel">
+
+                    <div class="panel-title">
+
+                        <span>USERS</span>
+
+                        <span
+                            class="count"
+                            id="userCount">
+                            0
+                        </span>
+
+                    </div>
+
+
+                    <div
+                        id="userList"
+                        class="user-list">
+
+                        <div class="loading">
+                            Loading users...
+                        </div>
+
+                    </div>
+
+                </div>
+
+
+                <!-- FILES -->
+
+                <div class="panel files-panel">
+
+                    <div class="panel-title">
+
+                        <span id="selectedUserTitle">
+                            SELECT A USER
+                        </span>
+
+                        <span
+                            class="count"
+                            id="fileCount">
+                            0
+                        </span>
+
+                    </div>
+
+
+                    <div
+                        id="fileList"
+                        class="file-list">
+
+                        <div class="empty-state">
+
+                            <div class="empty-icon">
+                                →
+                            </div>
+
+                            <h3>No user selected</h3>
+
+                            <p>
+                                Select a user from the left
+                                to view stored files.
+                            </p>
+
+                        </div>
+
+                    </div>
+
+                </div>
+
+            </div>
+
+        </section>
+
+
+        <!-- =========================
+             ONE-MANY SYSTEM
+        ========================== -->
+
+        <section
+            id="oneManySection"
+            class="mode-section hidden">
+
+            <div class="section-header">
+
+                <div>
+
+                    <p class="eyebrow">
+                        INTERNET DATA
+                    </p>
+
+                    <h2>One-Many Distribution</h2>
+
+                    <p class="description">
+                        Execute an internet data operation
+                        through the application runner.
+                    </p>
+
+                </div>
+
+            </div>
+
+
+            <div class="one-many-layout">
+
+                <!-- REQUEST FORM -->
+
+                <div class="panel request-panel">
+
+                    <div class="panel-title">
+                        <span>DATA REQUEST</span>
+                    </div>
+
+
+                    <form id="runnerForm">
+
+                        <div class="form-group">
+
+                            <label for="activity">
+                                ACTIVITY
+                            </label>
+
+                            <select
+                                id="activity"
+                                name="activity">
+
+                                <option value="download">
+                                    Download
+                                </option>
+
+                                <option value="stream">
+                                    Stream
+                                </option>
+
+                                <option value="fetch">
+                                    Fetch Data
+                                </option>
+
+                                <option value="custom">
+                                    Custom
+                                </option>
+
+                            </select>
+
+                        </div>
+
+
+                        <div class="form-group">
+
+                            <label for="url">
+                                INTERNET URL
+                            </label>
+
+                            <input
+                                type="url"
+                                id="url"
+                                name="url"
+                                placeholder="https://example.com/data"
+                                required>
+
+                        </div>
+
+
+                        <div class="form-row">
+
+                            <div class="form-group">
+
+                                <label for="port">
+                                    PORT
+                                </label>
+
+                                <input
+                                    type="number"
+                                    id="port"
+                                    name="port"
+                                    placeholder="8080"
+                                    min="1"
+                                    max="65535">
+
+                            </div>
+
+
+                            <div class="form-group">
+
+                                <label for="filename">
+                                    OUTPUT FILE
+                                </label>
+
+                                <input
+                                    type="text"
+                                    id="filename"
+                                    name="filename"
+                                    placeholder="output.bin">
+
+                            </div>
+
+                        </div>
+
+
+                        <div class="form-group">
+
+                            <label for="extraArgs">
+                                ADDITIONAL ARGUMENTS
+                            </label>
+
+                            <textarea
+                                id="extraArgs"
+                                name="extraArgs"
+                                placeholder="Enter additional parameters..."></textarea>
+
+                        </div>
+
+
+                        <button
+                            type="submit"
+                            class="run-btn"
+                            id="runBtn">
+
+                            <span>▶</span>
+                            Run Application
+
+                        </button>
+
+                    </form>
+
+                </div>
+
+
+                <!-- OUTPUT -->
+
+                <div class="panel output-panel">
+
+                    <div class="panel-title">
+
+                        <span>APPLICATION OUTPUT</span>
+
+                        <span
+                            id="runnerStatus"
+                            class="runner-status">
+                            IDLE
+                        </span>
+
+                    </div>
+
+
+                    <div
+                        id="runnerOutput"
+                        class="terminal">
+
+                        <div class="terminal-line">
+                            <span class="terminal-prefix">
+                                $
+                            </span>
+
+                            <span>
+                                Waiting for application...
+                            </span>
+                        </div>
+
+                    </div>
+
+                </div>
+
+            </div>
+
+        </section>
+
+    </main>
+
+
+    <!-- =========================
+         FOOTER
+    ========================== -->
+
+    <footer>
+
+        <span>
+            ZShare Data Transfer System
+        </span>
+
+        <span>
+            Linux • C/C++ • Networking
+        </span>
+
+    </footer>
+
+
+    <script src="script.js"></script>
+
+</body>
+</html>
