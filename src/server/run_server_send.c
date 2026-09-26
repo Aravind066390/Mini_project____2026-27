@@ -10,10 +10,10 @@
 #include <errno.h>
 #include <signal.h>
 #include <sys/wait.h>
+#include <dirent.h>
 
 #define USERS_DIR "storage/users"
 #define BUFFER_SIZE 8192
-
 
 /* ---------------------------------------------------------
    Check whether user directory exists
@@ -22,10 +22,7 @@ int user_exists(const char *username)
 {
     char path[512];
 
-    snprintf(path, sizeof(path),
-             "%s/%s",
-             USERS_DIR,
-             username);
+    snprintf(path, sizeof(path), "%s/%s", USERS_DIR, username);
 
     struct stat st;
 
@@ -35,148 +32,8 @@ int user_exists(const char *username)
     return 0;
 }
 
-
 /* ---------------------------------------------------------
-   Read the first filename from data.txt
-   --------------------------------------------------------- */
-int get_first_filename(const char *username,
-                       char *filename,
-                       size_t filename_size)
-{
-    char path[512];
-
-    snprintf(path, sizeof(path),
-             "%s/%s/data.txt",
-             USERS_DIR,
-             username);
-
-    FILE *fp = fopen(path, "r");
-
-    if (!fp)
-    {
-        perror("fopen data.txt");
-        return -1;
-    }
-
-    /*
-       Read the first line.
-    */
-    if (fgets(filename, filename_size, fp) == NULL)
-    {
-        fclose(fp);
-
-        /*
-           Empty data.txt
-        */
-        return 1;
-    }
-
-    fclose(fp);
-
-    /*
-       Remove newline.
-    */
-    filename[strcspn(filename, "\r\n")] = '\0';
-
-    if (filename[0] == '\0')
-        return 1;
-
-    return 0;
-}
-
-
-/* ---------------------------------------------------------
-   Remove the first entry from data.txt
-
-   Example:
-
-   Before:
-
-   video.mp4
-   image.jpg
-   notes.txt
-
-   After:
-
-   image.jpg
-   notes.txt
-   --------------------------------------------------------- */
-int remove_first_entry(const char *username)
-{
-    char data_path[512];
-    char temp_path[512];
-
-    snprintf(data_path, sizeof(data_path),
-             "%s/%s/data.txt",
-             USERS_DIR,
-             username);
-
-    snprintf(temp_path, sizeof(temp_path),
-             "%s/%s/data.tmp",
-             USERS_DIR,
-             username);
-
-    FILE *src = fopen(data_path, "r");
-
-    if (!src)
-    {
-        perror("fopen data.txt");
-        return -1;
-    }
-
-    FILE *tmp = fopen(temp_path, "w");
-
-    if (!tmp)
-    {
-        perror("fopen data.tmp");
-        fclose(src);
-        return -1;
-    }
-
-    char buffer[1024];
-
-    /*
-       Skip the first line.
-    */
-    if (fgets(buffer, sizeof(buffer), src) == NULL)
-    {
-        fclose(src);
-        fclose(tmp);
-
-        remove(temp_path);
-
-        return -1;
-    }
-
-    /*
-       Copy all remaining entries.
-    */
-    while (fgets(buffer, sizeof(buffer), src) != NULL)
-    {
-        fputs(buffer, tmp);
-    }
-
-    fclose(src);
-    fclose(tmp);
-
-    /*
-       Replace original data.txt.
-    */
-    if (rename(temp_path, data_path) != 0)
-    {
-        perror("rename");
-
-        remove(temp_path);
-
-        return -1;
-    }
-
-    return 0;
-}
-
-
-/* ---------------------------------------------------------
-   Send the complete file through TCP
+   Send a single complete file through TCP
    --------------------------------------------------------- */
 int send_file(int sockfd, const char *file_path)
 {
@@ -184,32 +41,26 @@ int send_file(int sockfd, const char *file_path)
 
     if (!fp)
     {
-        perror("fopen source file");
+        perror("[ERROR] fopen source file");
         return -1;
     }
 
     char buffer[BUFFER_SIZE];
-
     unsigned long long total_sent = 0;
 
     while (1)
     {
-        size_t n = fread(buffer, 1,
-                         sizeof(buffer),
-                         fp);
+        size_t n = fread(buffer, 1, sizeof(buffer), fp);
 
         if (n == 0)
         {
             if (ferror(fp))
             {
-                perror("fread");
+                perror("[ERROR] fread");
                 fclose(fp);
                 return -1;
             }
-
-            /*
-               End of file.
-            */
+            /* End of file */
             break;
         }
 
@@ -217,52 +68,37 @@ int send_file(int sockfd, const char *file_path)
 
         while (sent < n)
         {
-            ssize_t s = send(sockfd,
-                             buffer + sent,
-                             n - sent,
-                             0);
+            ssize_t s = send(sockfd, buffer + sent, n - sent, 0);
 
             if (s < 0)
             {
                 if (errno == EINTR)
                     continue;
 
-                perror("send");
-
+                perror("[ERROR] send");
                 fclose(fp);
-
                 return -1;
             }
 
             if (s == 0)
             {
                 printf("\n[ERROR] Connection closed while sending.\n");
-
                 fclose(fp);
-
                 return -1;
             }
 
             sent += s;
-
             total_sent += s;
 
-            printf("\r[SENDER] Sent: %llu bytes",
-                   total_sent);
-
+            printf("\r[SENDER] Sent: %llu bytes", total_sent);
             fflush(stdout);
         }
     }
 
-    printf("\n[SENDER] Transfer completed.\n");
-    printf("[SENDER] Total sent: %llu bytes\n",
-           total_sent);
-
+    printf("\n[SENDER] File transfer completed (%llu bytes).\n", total_sent);
     fclose(fp);
-
     return 0;
 }
-
 
 /* ---------------------------------------------------------
    Connect to destination
@@ -270,61 +106,107 @@ int send_file(int sockfd, const char *file_path)
 int connect_to_destination(const char *ip, int port)
 {
     int sockfd;
-
     struct sockaddr_in server_addr;
 
-    sockfd = socket(AF_INET,
-                    SOCK_STREAM,
-                    0);
+    sockfd = socket(AF_INET, SOCK_STREAM, 0);
 
     if (sockfd < 0)
     {
-        perror("socket");
+        perror("[ERROR] socket");
         return -1;
     }
 
-    memset(&server_addr,
-           0,
-           sizeof(server_addr));
-
+    memset(&server_addr, 0, sizeof(server_addr));
     server_addr.sin_family = AF_INET;
-
     server_addr.sin_port = htons(port);
 
-    if (inet_pton(AF_INET,
-                  ip,
-                  &server_addr.sin_addr) <= 0)
+    if (inet_pton(AF_INET, ip, &server_addr.sin_addr) <= 0)
     {
-        printf("[ERROR] Invalid IP address: %s\n",
-               ip);
-
+        printf("[ERROR] Invalid IP address: %s\n", ip);
         close(sockfd);
-
         return -1;
     }
 
-    printf("[SENDER] Connecting to %s:%d...\n",
-           ip,
-           port);
+    printf("[SENDER] Connecting to %s:%d...\n", ip, port);
 
-    if (connect(sockfd,
-                (struct sockaddr *)&server_addr,
-                sizeof(server_addr)) < 0)
+    if (connect(sockfd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0)
     {
-        perror("connect");
-
+        perror("[ERROR] connect");
         close(sockfd);
-
         return -1;
     }
 
-    printf("[SENDER] Connected to %s:%d\n",
-           ip,
-           port);
-
+    printf("[SENDER] Connected to %s:%d\n", ip, port);
     return sockfd;
 }
 
+/* ---------------------------------------------------------
+   Iterate directory and send all regular files
+   --------------------------------------------------------- */
+int send_user_directory_files(int sockfd, const char *username)
+{
+    char dir_path[512];
+    snprintf(dir_path, sizeof(dir_path), "%s/%s", USERS_DIR, username);
+
+    DIR *dir = opendir(dir_path);
+    if (!dir)
+    {
+        perror("[ERROR] opendir");
+        return -1;
+    }
+
+    struct dirent *entry;
+    int files_sent = 0;
+
+    while ((entry = readdir(dir)) != NULL)
+    {
+        /* Ignore hidden files, '.' and '..' */
+        if (entry->d_name[0] == '.')
+            continue;
+
+        char file_path[1024];
+        snprintf(file_path, sizeof(file_path), "%s/%s", dir_path, entry->d_name);
+
+        struct stat st;
+        if (stat(file_path, &st) != 0)
+        {
+            perror("[ERROR] stat");
+            continue;
+        }
+
+        /* Ensure it is a regular file */
+        if (S_ISREG(st.st_mode))
+        {
+            printf("\n----------------------------------------\n");
+            printf("[OK] Processing File: %s\n", entry->d_name);
+            printf("[OK] File path: %s\n", file_path);
+            printf("[OK] File size: %lld bytes\n", (long long)st.st_size);
+
+            if (send_file(sockfd, file_path) < 0)
+            {
+                printf("[ERROR] Failed to send file: %s\n", entry->d_name);
+                closedir(dir);
+                return -1;
+            }
+
+            files_sent++;
+        }
+    }
+
+    closedir(dir);
+
+    if (files_sent == 0)
+    {
+        printf("\n[INFO] No regular files found in directory '%s'.\n", dir_path);
+    }
+    else
+    {
+        printf("\n========================================\n");
+        printf("[OK] Total files sent successfully: %d\n", files_sent);
+    }
+
+    return 0;
+}
 
 /* ---------------------------------------------------------
    Main
@@ -333,233 +215,88 @@ int main(int argc, char *argv[])
 {
     if (argc != 4)
     {
-        printf("Usage: %s <username> <IP> <port>\n",
-               argv[0]);
-
+        printf("Usage: %s <username> <IP> <port>\n", argv[0]);
         printf("\nExample:\n");
-
-        printf("  %s aravind 192.168.1.20 9000\n",
-               argv[0]);
-
+        printf("  %s aravind 192.168.1.20 9000\n", argv[0]);
         return EXIT_FAILURE;
     }
 
     const char *username = argv[1];
-
     const char *ip = argv[2];
-
     int port = atoi(argv[3]);
 
-
-    /* -----------------------------------------------------
-       Validate port
-       ----------------------------------------------------- */
+    /* Validate port */
     if (port <= 0 || port > 65535)
     {
         printf("[ERROR] Invalid port number.\n");
-
         return EXIT_FAILURE;
     }
 
-
-    /* -----------------------------------------------------
-       Check user
-       ----------------------------------------------------- */
+    /* Check user */
     if (!user_exists(username))
     {
-        printf("[ERROR] User '%s' does not exist.\n",
-               username);
-
+        printf("[ERROR] User '%s' does not exist.\n", username);
         return EXIT_FAILURE;
     }
 
-    printf("[OK] User '%s' exists.\n",
-           username);
+    printf("[OK] User '%s' exists.\n", username);
 
-
-    /* -----------------------------------------------------
-       Get first pending file
-       ----------------------------------------------------- */
-
-    char filename[512];
-
-    int result =
-        get_first_filename(username,
-                           filename,
-                           sizeof(filename));
-
-    if (result < 0)
-    {
-        return EXIT_FAILURE;
-    }
-
-    if (result == 1)
-    {
-        printf("[INFO] data.txt is empty.\n");
-
-        return EXIT_SUCCESS;
-    }
-
-    printf("[OK] Next file: %s\n",
-           filename);
-
-
-    /* -----------------------------------------------------
-       Construct actual file path
-       ----------------------------------------------------- */
-
-    char file_path[1024];
-
-    snprintf(file_path,
-             sizeof(file_path),
-             "%s/%s/%s",
-             USERS_DIR,
-             username,
-             filename);
-
-    printf("[OK] Source file: %s\n",
-           file_path);
-
-
-    /* -----------------------------------------------------
-       Check source file
-       ----------------------------------------------------- */
-
-    struct stat st;
-
-    if (stat(file_path, &st) != 0)
-    {
-        perror("[ERROR] Source file");
-
-        return EXIT_FAILURE;
-    }
-
-    if (!S_ISREG(st.st_mode))
-    {
-        printf("[ERROR] Source is not a regular file.\n");
-
-        return EXIT_FAILURE;
-    }
-
-
-    printf("[OK] File size: %lld bytes\n",
-           (long long)st.st_size);
-
-
-    /* -----------------------------------------------------
-       Connect to destination
-       ----------------------------------------------------- */
-
-    int sockfd =
-        connect_to_destination(ip, port);
-
+    /* Connect to destination */
+    int sockfd = connect_to_destination(ip, port);
     if (sockfd < 0)
     {
         return EXIT_FAILURE;
     }
 
+    /* Process directory and send files */
+    int result = send_user_directory_files(sockfd, username);
 
-    /* -----------------------------------------------------
-       Send file
-       ----------------------------------------------------- */
-
-    int send_result =
-        send_file(sockfd, file_path);
-
-
-    /*
-       Closing the socket tells the receiver:
-
-       "No more data is coming."
-    */
+    /* Signal EOF to the receiver */
     shutdown(sockfd, SHUT_WR);
-
     close(sockfd);
 
-
-    /* -----------------------------------------------------
-       IMPORTANT:
-
-       Remove entry ONLY if transfer succeeded.
-       ----------------------------------------------------- */
-
-    if (send_result == 0)
+    if (result < 0)
     {
-        printf("[OK] File sent successfully.\n");
-
-        printf("[SENDER] Removing '%s' from data.txt...\n",
-               filename);
-
-        if (remove_first_entry(username) != 0)
-        {
-            printf("[ERROR] File was sent, "
-                   "but data.txt could not be updated.\n");
-
-            return EXIT_FAILURE;
-        }
-
-        printf("[OK] Removed '%s' from data.txt.\n",
-               filename);
-    }
-    else
-    {
-        printf("[ERROR] Transfer failed.\n");
-
-        printf("[INFO] '%s' remains in data.txt.\n",
-               filename);
-
+        printf("[ERROR] Directory transfer failed.\n");
         return EXIT_FAILURE;
     }
 
-
     return EXIT_SUCCESS;
 }
+
 /**
-Step 1:
-Check user aravind
+
+Directory-Based File Sender Documentation1. PurposeThis program reads files directly from a user's storage directory (storage/users/<username>/) using standard filesystem directory scanning (opendir()/readdir()) and transfers all valid regular files over a TCP connection to a destination IP and port.2. Updated Program Execution StepsPlaintextStep 1:
+Check user directory existence (storage/users/aravind/)
 
 Step 2:
-Open data.txt
+Connect via TCP socket to 192.168.1.20:9000
 
 Step 3:
-Read first entry
-
-        video.mp4
+Open directory using opendir()
 
 Step 4:
-Construct:
-
-storage/users/aravind/video.mp4
+Loop through directory entries using readdir()
 
 Step 5:
-Check file
+Filter out hidden items (e.g., '.', '..') and verify regular file status via stat()
 
 Step 6:
-Create TCP socket
+For each regular file:
+    - Open file in binary mode ("rb")
+    - Read payload via fread()
+    - Send payload via send()
+    - Close file upon EOF
 
 Step 7:
-Connect to:
-
-192.168.1.20:9000
+Close directory handle (closedir())
 
 Step 8:
-Open video.mp4
+Issue shutdown(sockfd, SHUT_WR) to inform remote peer transfer completion
 
 Step 9:
-Read file using fread()
+Close socket and exit
+3. System Calls & Functions UsedFunctionPurposeopendir()Opens directory stream for readingreaddir()Reads successive directory entries (struct dirent)closedir()Closes directory stream handlestat() / S_ISREG()Retrieves metadata and checks if an entry is a regular filesocket() / connect()Allocates TCP socket and connects to serverfread() / send()Streams file data in 8 KB chunksshutdown()Signals TCP EOF (FIN) to receiver
 
-Step 10:
-Send data using send()
 
-Step 11:
-Reach EOF
-
-Step 12:
-shutdown(SHUT_WR)
-
-Step 13:
-Close socket
-
-Step 14:
-Remove video.mp4 from data.txt
-  */
+*/
