@@ -141,7 +141,7 @@ int connect_to_destination(const char *ip, int port)
 }
 
 /* ---------------------------------------------------------
-   Iterate directory and send all regular files
+   Iterate directory, send regular files, and delete them upon success
    --------------------------------------------------------- */
 int send_user_directory_files(int sockfd, const char *username)
 {
@@ -182,11 +182,22 @@ int send_user_directory_files(int sockfd, const char *username)
             printf("[OK] File path: %s\n", file_path);
             printf("[OK] File size: %lld bytes\n", (long long)st.st_size);
 
+            /* 1. Send the file over TCP */
             if (send_file(sockfd, file_path) < 0)
             {
-                printf("[ERROR] Failed to send file: %s\n", entry->d_name);
+                printf("[ERROR] Failed to send file: %s (Keeping file on disk)\n", entry->d_name);
                 closedir(dir);
                 return -1;
+            }
+
+            /* 2. Delete the file ONLY after successful transfer */
+            if (remove(file_path) == 0)
+            {
+                printf("[OK] Deleted local copy: %s\n", entry->d_name);
+            }
+            else
+            {
+                perror("[ERROR] Failed to delete file");
             }
 
             files_sent++;
@@ -202,7 +213,7 @@ int send_user_directory_files(int sockfd, const char *username)
     else
     {
         printf("\n========================================\n");
-        printf("[OK] Total files sent successfully: %d\n", files_sent);
+        printf("[OK] Total files sent and deleted: %d\n", files_sent);
     }
 
     return 0;
@@ -248,7 +259,7 @@ int main(int argc, char *argv[])
         return EXIT_FAILURE;
     }
 
-    /* Process directory and send files */
+    /* Process directory, send files, and delete sent files */
     int result = send_user_directory_files(sockfd, username);
 
     /* Signal EOF to the receiver */
@@ -265,15 +276,14 @@ int main(int argc, char *argv[])
 }
 
 /**
-
-Directory-Based File Sender Documentation1. PurposeThis program reads files directly from a user's storage directory (storage/users/<username>/) using standard filesystem directory scanning (opendir()/readdir()) and transfers all valid regular files over a TCP connection to a destination IP and port.2. Updated Program Execution StepsPlaintextStep 1:
-Check user directory existence (storage/users/aravind/)
+Directory-Based File Sender Documentation1. PurposeThis program reads files directly from a user's storage directory (storage/users/<username>/) using standard filesystem directory scanning (opendir()/readdir()). It transfers all valid regular files sequentially over a TCP connection to a destination IP and port, and automatically deletes each file from the local filesystem immediately after a successful transfer.2. Execution StepsPlaintextStep 1:
+Check user directory existence (storage/users/<username>/)
 
 Step 2:
-Connect via TCP socket to 192.168.1.20:9000
+Connect via TCP socket to target IP:Port
 
 Step 3:
-Open directory using opendir()
+Open user directory using opendir()
 
 Step 4:
 Loop through directory entries using readdir()
@@ -287,16 +297,16 @@ For each regular file:
     - Read payload via fread()
     - Send payload via send()
     - Close file upon EOF
+    - Delete local file using remove() ONLY if sending succeeded
 
 Step 7:
 Close directory handle (closedir())
 
 Step 8:
-Issue shutdown(sockfd, SHUT_WR) to inform remote peer transfer completion
+Issue shutdown(sockfd, SHUT_WR) to signal remote peer transfer completion
 
 Step 9:
 Close socket and exit
-3. System Calls & Functions UsedFunctionPurposeopendir()Opens directory stream for readingreaddir()Reads successive directory entries (struct dirent)closedir()Closes directory stream handlestat() / S_ISREG()Retrieves metadata and checks if an entry is a regular filesocket() / connect()Allocates TCP socket and connects to serverfread() / send()Streams file data in 8 KB chunksshutdown()Signals TCP EOF (FIN) to receiver
-
+3. System Calls & Functions UsedFunctionPurposeopendir()Opens directory stream for readingreaddir()Reads successive directory entries (struct dirent)closedir()Closes directory stream handlestat() / S_ISREG()Retrieves metadata and checks if an entry is a regular fileremove()Deletes the sent file from the local disk filesystemsocket() / connect()Allocates TCP socket and connects to serverfread() / send()Streams file data in 8 KB chunksshutdown()Signals TCP EOF (FIN) to receiver
 
 */
