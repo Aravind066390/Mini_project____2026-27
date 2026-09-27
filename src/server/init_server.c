@@ -5,6 +5,7 @@
 #include <errno.h>
 #include <signal.h>
 #include <ctype.h>
+#include <dirent.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/wait.h>
@@ -19,6 +20,7 @@
 #define LOGIN_OK       1
 #define LOGIN_FAILED   0
 #define USERS_DIR "storage/users"
+#define BUFFER_SIZE 8192
 
 void sanitize_input(char *str) {
     for (int i = 0; str[i]; i++) {
@@ -76,7 +78,6 @@ int db_add_user(const char *username, const char *password)
     sanitize_input(safe_user);
     sanitize_input(safe_pass);
 
-    /* Guarantee directory hierarchy creation */
     char user_dir[256];
     mkdir("storage", 0777);
     mkdir(USERS_DIR, 0777);
@@ -84,36 +85,7 @@ int db_add_user(const char *username, const char *password)
     mkdir(user_dir, 0777);
 
     char query[512];
-    snprintf(query, sizeof(query), "-c \"INSERT INTO users (username, password) VALUES ('%s', '%s');\"", safe_user, safe_pass);
-    return give_sql(query);
-}
-
-int db_update_user(const char *username, const char *new_password)
-{
-    char safe_user[128], safe_pass[128];
-    strncpy(safe_user, username, sizeof(safe_user) - 1);
-    strncpy(safe_pass, new_password, sizeof(safe_pass) - 1);
-    safe_user[sizeof(safe_user) - 1] = '\0';
-    safe_pass[sizeof(safe_pass) - 1] = '\0';
-
-    sanitize_input(safe_user);
-    sanitize_input(safe_pass);
-
-    char query[512];
-    snprintf(query, sizeof(query), "-c \"UPDATE users SET password='%s' WHERE username='%s';\"", safe_pass, safe_user);
-    return give_sql(query);
-}
-
-int db_delete_user(const char *username)
-{
-    char safe_user[128];
-    strncpy(safe_user, username, sizeof(safe_user) - 1);
-    safe_user[sizeof(safe_user) - 1] = '\0';
-
-    sanitize_input(safe_user);
-
-    char query[512];
-    snprintf(query, sizeof(query), "-c \"DELETE FROM users WHERE username='%s';\"", safe_user);
+    snprintf(query, sizeof(query), "-c \"INSERT INTO users (username, password) VALUES ('%s', '%s') ON CONFLICT DO NOTHING;\"", safe_user, safe_pass);
     return give_sql(query);
 }
 
@@ -191,34 +163,19 @@ void handle_client(int client_fd)
         exit(EXIT_FAILURE);
     }
 
+    /* Handle Administrative Commands */
     if (strncmp(command, "ADD_USER", 8) == 0) {
         char target_user[128] = {0}, target_pass[128] = {0};
         sscanf(command + 9, "%127s %127s", target_user, target_pass);
 
         if (db_add_user(target_user, target_pass)) send(client_fd, "ADD_USER_SUCCESS\n", 17, 0);
         else send(client_fd, "ADD_USER_FAILED\n", 16, 0);
-        close(client_fd);
-        exit(EXIT_SUCCESS);
-    }
-    else if (strncmp(command, "UPDATE_USER", 11) == 0) {
-        char target_user[128] = {0}, target_pass[128] = {0};
-        sscanf(command + 12, "%127s %127s", target_user, target_pass);
 
-        if (db_update_user(target_user, target_pass)) send(client_fd, "UPDATE_USER_SUCCESS\n", 20, 0);
-        else send(client_fd, "UPDATE_USER_FAILED\n", 19, 0);
-        close(client_fd);
-        exit(EXIT_SUCCESS);
-    }
-    else if (strncmp(command, "DELETE_USER", 11) == 0) {
-        char target_user[128] = {0};
-        sscanf(command + 12, "%127s", target_user);
-
-        if (db_delete_user(target_user)) send(client_fd, "DELETE_USER_SUCCESS\n", 20, 0);
-        else send(client_fd, "DELETE_USER_FAILED\n", 19, 0);
         close(client_fd);
         exit(EXIT_SUCCESS);
     }
 
+    /* Handle File Transfer Commands (PUT / GET) */
     int transfer_port;
     int transfer_listener = create_transfer_listener(&transfer_port);
     if (transfer_listener < 0) {
@@ -270,8 +227,8 @@ void handle_client(int client_fd)
 int main(void)
 {
     signal(SIGCHLD, SIG_IGN);
+    signal(SIGPIPE, SIG_IGN);
 
-    /* Lock working directory to binary location */
     char exe_path[1024];
     ssize_t len = readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
     if (len != -1) {
@@ -279,7 +236,6 @@ int main(void)
         chdir(dirname(exe_path));
     }
 
-    /* Ensure default storage paths exist prior to accepting connections */
     mkdir("storage", 0777);
     mkdir(USERS_DIR, 0777);
 
