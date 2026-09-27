@@ -4,6 +4,7 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <libgen.h>
+#include <errno.h>
 
 #define BUFFER_SIZE 8192
 
@@ -21,7 +22,7 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
-    /* Lock working directory to execution path */
+    /* Lock working directory to binary location */
     char exe_path[1024];
     ssize_t len = readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
     if (len != -1) {
@@ -53,10 +54,18 @@ int main(int argc, char *argv[]) {
 
     char buffer[BUFFER_SIZE];
     ssize_t bytes_read;
+
+    /* Read raw binary payload until client closes socket (EOF) */
     while ((bytes_read = read(STDIN_FILENO, buffer, sizeof(buffer))) > 0) {
-        fwrite(buffer, 1, bytes_read, fp);
+        size_t written = fwrite(buffer, 1, bytes_read, fp);
+        if (written < (size_t)bytes_read) {
+            perror("[RUN_SERVER_GET] Disk write error");
+            fclose(fp);
+            return EXIT_FAILURE;
+        }
     }
 
+    fflush(fp);
     fclose(fp);
     return EXIT_SUCCESS;
 }
