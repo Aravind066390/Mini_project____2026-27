@@ -17,7 +17,7 @@ int user_exists(const char *username)
     return (stat(path, &st) == 0 && S_ISDIR(st.st_mode));
 }
 
-int send_file(const char *file_path)
+int send_file_binary(const char *file_path)
 {
     FILE *fp = fopen(file_path, "rb");
     if (!fp) return -1;
@@ -26,10 +26,16 @@ int send_file(const char *file_path)
     size_t n;
 
     while ((n = fread(buffer, 1, sizeof(buffer), fp)) > 0) {
-        ssize_t sent = write(STDOUT_FILENO, buffer, n);
-        if (sent < 0) {
-            fclose(fp);
-            return -1;
+        ssize_t total_written = 0;
+        /* Guaranteed write loop to handle short socket writes */
+        while (total_written < (ssize_t)n) {
+            ssize_t sent = write(STDOUT_FILENO, buffer + total_written, n - total_written);
+            if (sent <= 0) {
+                if (sent < 0 && errno == EINTR) continue;
+                fclose(fp);
+                return -1;
+            }
+            total_written += sent;
         }
     }
 
@@ -62,8 +68,8 @@ int main(int argc, char *argv[])
 
         struct stat st;
         if (stat(file_path, &st) == 0 && S_ISREG(st.st_mode)) {
-            if (send_file(file_path) == 0) {
-                remove(file_path);
+            if (send_file_binary(file_path) == 0) {
+                unlink(file_path); // Clean up file after sending
             } else {
                 closedir(dir);
                 return EXIT_FAILURE;
