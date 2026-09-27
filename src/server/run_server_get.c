@@ -3,54 +3,58 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/stat.h>
-#include <errno.h>
+#include <libgen.h>
 
-#define USERS_DIR "storage/users"
 #define BUFFER_SIZE 8192
 
-int user_exists(const char *username)
-{
-    char path[512];
-    snprintf(path, sizeof(path), "%s/%s", USERS_DIR, username);
-    struct stat st;
-    return (stat(path, &st) == 0 && S_ISDIR(st.st_mode));
+void trim_newline(char *str) {
+    if (!str) return;
+    size_t len = strlen(str);
+    while (len > 0 && (str[len - 1] == '\n' || str[len - 1] == '\r' || str[len - 1] == ' ')) {
+        str[--len] = '\0';
+    }
 }
 
-int main(int argc, char *argv[])
-{
-    if (argc != 3) {
-        fprintf(stderr, "Usage: %s <username> <filename>\n", argv[0]);
+int main(int argc, char *argv[]) {
+    if (argc < 3) {
+        fprintf(stderr, "[RUN_SERVER_GET] Usage: %s <username> <filename>\n", argv[0]);
         return EXIT_FAILURE;
     }
 
-    const char *username = argv[1];
-    const char *filename = argv[2];
-
-    if (!user_exists(username)) {
-        fprintf(stderr, "[ERROR] User '%s' storage directory does not exist.\n", username);
-        return EXIT_FAILURE;
+    /* Lock working directory to execution path */
+    char exe_path[1024];
+    ssize_t len = readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
+    if (len != -1) {
+        exe_path[len] = '\0';
+        chdir(dirname(exe_path));
     }
 
-    char file_path[512];
-    snprintf(file_path, sizeof(file_path), "%s/%s/%s", USERS_DIR, username, filename);
+    char *username = argv[1];
+    char *filename = argv[2];
 
-    FILE *fp = fopen(file_path, "wb");
+    trim_newline(username);
+    trim_newline(filename);
+
+    mkdir("storage", 0777);
+    mkdir("storage/users", 0777);
+
+    char user_dir[256];
+    snprintf(user_dir, sizeof(user_dir), "storage/users/%s", username);
+    mkdir(user_dir, 0777);
+
+    char filepath[512];
+    snprintf(filepath, sizeof(filepath), "storage/users/%s/%s", username, filename);
+
+    FILE *fp = fopen(filepath, "wb");
     if (!fp) {
-        perror("[ERROR] fopen destination");
+        perror("[RUN_SERVER_GET] fopen failed");
         return EXIT_FAILURE;
     }
 
     char buffer[BUFFER_SIZE];
-    ssize_t n;
-
-    /* Reads stream payload directly from standard input socket descriptor */
-    while ((n = read(STDIN_FILENO, buffer, sizeof(buffer))) > 0) {
-        size_t written = fwrite(buffer, 1, n, fp);
-        if (written != (size_t)n) {
-            perror("[ERROR] fwrite");
-            fclose(fp);
-            return EXIT_FAILURE;
-        }
+    ssize_t bytes_read;
+    while ((bytes_read = read(STDIN_FILENO, buffer, sizeof(buffer))) > 0) {
+        fwrite(buffer, 1, bytes_read, fp);
     }
 
     fclose(fp);
