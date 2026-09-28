@@ -56,15 +56,20 @@ int db_check_user(const char *username, const char *password)
     sanitize_input(safe_pass);
 
     char query[512];
-    snprintf(query, sizeof(query), "-c \"SELECT username FROM users WHERE username='%s' AND password='%s';\"", safe_user, safe_pass);
+    snprintf(query, sizeof(query), "-t -A -c \"SELECT username FROM users WHERE username='%s' AND password='%s';\"", safe_user, safe_pass);
 
     sqlr *res = ask_sql(query);
     if (res == NULL) return LOGIN_FAILED;
 
-    int count = res->l;
-    delete res;
+    int is_valid = 0;
+    if (res->l > 0 && res->A && res->A->value && res->A->value[0]) {
+        if (strcmp(res->A->value[0], safe_user) == 0) {
+            is_valid = 1;
+        }
+    }
 
-    return (count > 0) ? LOGIN_OK : LOGIN_FAILED;
+    delete res;
+    return is_valid ? LOGIN_OK : LOGIN_FAILED;
 }
 
 int db_add_user(const char *username, const char *password)
@@ -143,21 +148,17 @@ int create_transfer_listener(int *port_out)
 void handle_client(int client_fd)
 {
     char username[128] = {0}, password[128] = {0}, command[256] = {0};
-
     if (read_line(client_fd, username, sizeof(username)) <= 0 ||
         read_line(client_fd, password, sizeof(password)) <= 0) {
         close(client_fd);
         exit(EXIT_FAILURE);
     }
-
     if (db_check_user(username, password) != LOGIN_OK) {
         send(client_fd, "LOGIN_FAILED\n", 13, 0);
         close(client_fd);
         exit(EXIT_SUCCESS);
     }
-
     send(client_fd, "LOGIN_OK\n", 9, 0);
-
     if (read_line(client_fd, command, sizeof(command)) <= 0) {
         close(client_fd);
         exit(EXIT_FAILURE);
@@ -171,6 +172,45 @@ void handle_client(int client_fd)
         if (db_add_user(target_user, target_pass)) send(client_fd, "ADD_USER_SUCCESS\n", 17, 0);
         else send(client_fd, "ADD_USER_FAILED\n", 16, 0);
 
+        close(client_fd);
+        exit(EXIT_SUCCESS);
+    }
+    else if (strncmp(command, "UPDATE_USER", 11) == 0) {
+        char target_user[128] = {0}, new_pass[128] = {0};
+        sscanf(command + 12, "%127s %127s", target_user, new_pass);
+
+        char safe_user[128], safe_pass[128];
+        strncpy(safe_user, target_user, sizeof(safe_user) - 1);
+        strncpy(safe_pass, new_pass, sizeof(safe_pass) - 1);
+        sanitize_input(safe_user);
+        sanitize_input(safe_pass);
+
+        char query[512];
+        snprintf(query, sizeof(query), "-c \"UPDATE users SET password='%s' WHERE username='%s';\"", safe_pass, safe_user);
+
+        if (give_sql(query)) send(client_fd, "UPDATE_SUCCESS\n", 15, 0);
+        else send(client_fd, "UPDATE_FAILED\n", 14, 0);
+
+        close(client_fd);
+        exit(EXIT_SUCCESS);
+    }
+    else if (strncmp(command, "DELETE_USER", 11) == 0) {
+        char target_user[128] = {0};
+        sscanf(command + 12, "%127s", target_user);
+
+        char safe_user[128];
+        strncpy(safe_user, target_user, sizeof(safe_user) - 1);
+        sanitize_input(safe_user);
+
+        char query[512];
+        snprintf(query, sizeof(query), "-c \"DELETE FROM users WHERE username='%s';\"", safe_user);
+        give_sql(query);
+
+        char user_dir[256];
+        snprintf(user_dir, sizeof(user_dir), "%s/%s", USERS_DIR, safe_user);
+        rmdir(user_dir);
+
+        send(client_fd, "DELETE_SUCCESS\n", 15, 0);
         close(client_fd);
         exit(EXIT_SUCCESS);
     }
@@ -207,11 +247,9 @@ void handle_client(int client_fd)
         dup2(data_fd, STDOUT_FILENO);
         close(data_fd);
 
-        /* ✅ MODIFIED SECTION: Clean parsing of PUT <recipient> <filename> */
         if (strncmp(command, "PUT", 3) == 0) {
             char action[32] = {0}, recipient[128] = {0}, filename[256] = {0};
 
-            /* Extract action ("PUT"), recipient ("admin"), and filename ("vedio_ender.mp4") */
             if (sscanf(command, "%31s %127s %255s", action, recipient, filename) == 3) {
                 execl("./run_server_get", "run_server_get", recipient, filename, NULL);
             } else {
@@ -236,7 +274,6 @@ int main(void)
 {
     signal(SIGCHLD, SIG_IGN);
     signal(SIGPIPE, SIG_IGN);
-
     char exe_path[1024];
     ssize_t len = readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
     if (len != -1) {
@@ -249,6 +286,21 @@ int main(void)
 
     start_sql((char *)"sudo -u postgres psql");
 
+    /* Optional Auto-Seed Default Admin User if Database is Empty */
+    {
+        char seed_q[256];
+        snprintf(seed_q, sizeof(seed_q), "-t -A -c \"SELECT count(*) FROM users;\"");
+        sqlr *res = ask_sql(seed_q);
+        int total_users = 0;
+        if (res && res->A && res->A->value && res->A->value[0]) {
+            total_users = atoi(res->A->value[0]);
+        }
+        if(res)delete res;
+        if (total_users == 0) {
+            printf("[SERVER] No users found. Creating default admin account (admin / admin123)...\n");
+            db_add_user("admin", "admin123");
+        }
+    }
     int server_fd = create_server_socket(CONTROL_PORT);
     if (server_fd < 0) {
         end_sql();
@@ -262,14 +314,12 @@ int main(void)
         socklen_t client_len = sizeof(client_addr);
         int client_fd = accept(server_fd, (struct sockaddr *)&client_addr, &client_len);
         if (client_fd < 0) continue;
-
         if (fork() == 0) {
             close(server_fd);
             handle_client(client_fd);
         }
         close(client_fd);
     }
-
     close(server_fd);
     end_sql();
     return EXIT_SUCCESS;
