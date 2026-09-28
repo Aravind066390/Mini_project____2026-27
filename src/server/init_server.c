@@ -207,9 +207,17 @@ void handle_client(int client_fd)
         dup2(data_fd, STDOUT_FILENO);
         close(data_fd);
 
+        /* ✅ MODIFIED SECTION: Clean parsing of PUT <recipient> <filename> */
         if (strncmp(command, "PUT", 3) == 0) {
-            char *filename = command + 4;
-            execl("./run_server_get", "run_server_get", username, filename, NULL);
+            char action[32] = {0}, recipient[128] = {0}, filename[256] = {0};
+
+            /* Extract action ("PUT"), recipient ("admin"), and filename ("vedio_ender.mp4") */
+            if (sscanf(command, "%31s %127s %255s", action, recipient, filename) == 3) {
+                execl("./run_server_get", "run_server_get", recipient, filename, NULL);
+            } else {
+                fprintf(stderr, "[SERVER ERROR] Invalid PUT command syntax: %s\n", command);
+                exit(EXIT_FAILURE);
+            }
         } else if (strncmp(command, "GET", 3) == 0) {
             execl("./run_server_send", "run_server_send", username, NULL);
         }
