@@ -4,12 +4,22 @@
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <sys/socket.h>
-#include <sys/stat.h>
-#include <errno.h>
 
-#define SERVER_IP "10.0.2.15"  /* Matches your server IP */
+#define SERVER_IP "10.0.2.15"
 #define CONTROL_PORT 8012
 #define BUFFER_SIZE 8192
+
+ssize_t send_all(int socket_fd, const void *buffer, size_t length) {
+    size_t total_sent = 0;
+    const char *ptr = (const char *)buffer;
+
+    while (total_sent < length) {
+        ssize_t sent = send(socket_fd, ptr + total_sent, length - total_sent, 0);
+        if (sent <= 0) return -1;
+        total_sent += sent;
+    }
+    return total_sent;
+}
 
 ssize_t read_line(int fd, char *buffer, size_t max_len) {
     size_t count = 0;
@@ -41,35 +51,35 @@ int connect_to_host(const char *ip, int port) {
     return sockfd;
 }
 
-int ensure_directory_exists(const char *dir_path) {
-    struct stat st;
-    if (stat(dir_path, &st) != 0) {
-        if (mkdir(dir_path, 0755) != 0 && errno != EEXIST) {
-            return -1;
-        }
-    }
-    return 0;
-}
-
 int main(int argc, char *argv[]) {
-    if (argc < 4) {
-        printf("Usage: %s <username> <password> <output_dir_or_file>\n", argv[0]);
-        printf("Example: %s testuser testpass ./downloads\n", argv[0]);
+    /* Updated usage to include <recipient> */
+    if (argc < 6) {
+        printf("Usage: %s <username> <password> <recipient> <local_file> <remote_file_name>\n", argv[0]);
+        printf("Example: %s arav mypass srt video.mp4 receiver_video.mp4\n", argv[0]);
         return EXIT_FAILURE;
     }
 
     const char *user = argv[1];
     const char *pass = argv[2];
-    const char *output_target = argv[3];
+    const char *recipient = argv[3];    /* Target user (e.g., srt) */
+    const char *local_file = argv[4];
+    const char *remote_file = argv[5];
+
+    FILE *fp = fopen(local_file, "rb");
+    if (!fp) {
+        perror("[SENDER] Failed to open local file");
+        return EXIT_FAILURE;
+    }
 
     /* 1. Connect to control socket */
     int control_fd = connect_to_host(SERVER_IP, CONTROL_PORT);
     if (control_fd < 0) {
-        perror("[RECEIVER] Cannot connect to control port");
+        perror("[SENDER] Cannot connect to control port");
+        fclose(fp);
         return EXIT_FAILURE;
     }
 
-    /* 2. Authenticate */
+    /* 2. Authenticate as sender (e.g., arav) */
     char buffer[256];
     snprintf(buffer, sizeof(buffer), "%s\n", user);
     send(control_fd, buffer, strlen(buffer), 0);
@@ -78,70 +88,47 @@ int main(int argc, char *argv[]) {
 
     read_line(control_fd, buffer, sizeof(buffer));
     if (strcmp(buffer, "LOGIN_OK") != 0) {
-        printf("[RECEIVER] Authentication failed: %s\n", buffer);
+        printf("[SENDER] Authentication failed: %s\n", buffer);
         close(control_fd);
+        fclose(fp);
         return EXIT_FAILURE;
     }
 
-    /* 3. Issue GET command to fetch queued files */
-    snprintf(buffer, sizeof(buffer), "GET\n");
+    /* 3. Issue PUT command specifying RECIPIENT and REMOTE_FILE */
+    snprintf(buffer, sizeof(buffer), "PUT %s %s\n", recipient, remote_file);
     send(control_fd, buffer, strlen(buffer), 0);
 
-    /* 4. Read assigned transfer port */
+    /* 4. Get dynamic data transfer port */
     read_line(control_fd, buffer, sizeof(buffer));
     int data_port = -1;
     if (sscanf(buffer, "TRANSFER_PORT %d", &data_port) != 1) {
-        printf("[RECEIVER] Failed to get data port: %s\n", buffer);
+        printf("[SENDER] Failed to get data port: %s\n", buffer);
         close(control_fd);
+        fclose(fp);
         return EXIT_FAILURE;
     }
     close(control_fd);
 
-    /* 5. Connect to data socket */
+    /* 5. Connect to data socket and stream binary payload */
     int data_fd = connect_to_host(SERVER_IP, data_port);
     if (data_fd < 0) {
-        perror("[RECEIVER] Failed to connect to data port");
+        perror("[SENDER] Failed to connect to data port");
+        fclose(fp);
         return EXIT_FAILURE;
     }
 
-    /* Ensure output folder exists if downloading to directory */
-    ensure_directory_exists(output_target);
-
-    char save_path[512];
-    struct stat st;
-    if (stat(output_target, &st) == 0 && S_ISDIR(st.st_mode)) {
-        snprintf(save_path, sizeof(save_path), "%s/downloaded_mailbox.bin", output_target);
-    } else {
-        snprintf(save_path, sizeof(save_path), "%s", output_target);
-    }
-
-    FILE *fp = fopen(save_path, "wb");
-    if (!fp) {
-        perror("[RECEIVER] Cannot open local output destination");
-        close(data_fd);
-        return EXIT_FAILURE;
-    }
-
-    printf("[RECEIVER] Retrieving all pending files into '%s'...\n", save_path);
+    printf("[SENDER] Uploading '%s' to '%s' as '%s'...\n", local_file, recipient, remote_file);
     char buf[BUFFER_SIZE];
-    ssize_t n;
-    size_t total_bytes = 0;
-
-    while ((n = recv(data_fd, buf, sizeof(buf), 0)) > 0) {
-        fwrite(buf, 1, n, fp);
-        total_bytes += n;
+    size_t n;
+    while ((n = fread(buf, 1, sizeof(buf), fp)) > 0) {
+        if (send_all(data_fd, buf, n) < 0) {
+            perror("[SENDER] Upload interrupted");
+            break;
+        }
     }
 
-    fflush(fp);
+    printf("[SENDER] Transfer complete. File delivered to '%s's mailbox!\n", recipient);
     fclose(fp);
     close(data_fd);
-
-    if (total_bytes == 0) {
-        printf("[RECEIVER] Mailbox empty. No pending files found on server.\n");
-        unlink(save_path); // Delete empty file
-    } else {
-        printf("[RECEIVER] Download complete. Total retrieved: %zu bytes.\n", total_bytes);
-    }
-
     return EXIT_SUCCESS;
 }
