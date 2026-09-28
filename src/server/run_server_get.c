@@ -8,7 +8,8 @@
 
 #define BUFFER_SIZE 8192
 
-void trim_newline(char *str) {
+/* Removes trailing newlines, carriage returns, or trailing spaces from strings */
+void trim_string(char *str) {
     if (!str) return;
     size_t len = strlen(str);
     while (len > 0 && (str[len - 1] == '\n' || str[len - 1] == '\r' || str[len - 1] == ' ')) {
@@ -18,11 +19,12 @@ void trim_newline(char *str) {
 
 int main(int argc, char *argv[]) {
     if (argc < 3) {
-        fprintf(stderr, "[RUN_SERVER_GET] Usage: %s <username> <filename>\n", argv[0]);
+        fprintf(stderr, "[RUN_SERVER_RECV ERROR] Insufficient arguments.\n");
+        fprintf(stderr, "Usage: %s <recipient_username> <filename>\n", argv[0]);
         return EXIT_FAILURE;
     }
 
-    /* Lock working directory to binary location */
+    /* Lock working directory to the binary location */
     char exe_path[1024];
     ssize_t len = readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
     if (len != -1) {
@@ -30,42 +32,62 @@ int main(int argc, char *argv[]) {
         chdir(dirname(exe_path));
     }
 
-    char *username = argv[1];
-    char *filename = argv[2];
+    char recipient[128];
+    char filename[256];
 
-    trim_newline(username);
-    trim_newline(filename);
+    strncpy(recipient, argv[1], sizeof(recipient) - 1);
+    recipient[sizeof(recipient) - 1] = '\0';
 
-    mkdir("storage", 0777);
-    mkdir("storage/users", 0777);
+    strncpy(filename, argv[2], sizeof(filename) - 1);
+    filename[sizeof(filename) - 1] = '\0';
 
-    char user_dir[256];
-    snprintf(user_dir, sizeof(user_dir), "storage/users/%s", username);
-    mkdir(user_dir, 0777);
+    trim_string(recipient);
+    trim_string(filename);
 
-    char filepath[512];
-    snprintf(filepath, sizeof(filepath), "storage/users/%s/%s", username, filename);
-
-    FILE *fp = fopen(filepath, "wb");
-    if (!fp) {
-        perror("[RUN_SERVER_GET] fopen failed");
+    if (strlen(recipient) == 0 || strlen(filename) == 0) {
+        fprintf(stderr, "[RUN_SERVER_RECV ERROR] Recipient or filename is empty.\n");
         return EXIT_FAILURE;
     }
 
+    /* 1. Ensure directory tree storage/users/<recipient> exists */
+    mkdir("storage", 0777);
+    mkdir("storage/users", 0777);
+
+    char user_dir[512];
+    snprintf(user_dir, sizeof(user_dir), "storage/users/%s", recipient);
+    if (mkdir(user_dir, 0777) != 0 && errno != EEXIST) {
+        perror("[RUN_SERVER_RECV ERROR] Failed to create recipient user directory");
+        return EXIT_FAILURE;
+    }
+
+    /* 2. Build explicit file path: storage/users/<recipient>/<filename> */
+    char filepath[1024];
+    snprintf(filepath, sizeof(filepath), "storage/users/%s/%s", recipient, filename);
+
+    FILE *fp = fopen(filepath, "wb");
+    if (!fp) {
+        perror("[RUN_SERVER_RECV ERROR] fopen failed");
+        return EXIT_FAILURE;
+    }
+
+    /* 3. Read binary payload from socket (redirected via STDIN_FILENO) and write to disk */
     char buffer[BUFFER_SIZE];
     ssize_t bytes_read;
+    size_t total_written = 0;
 
-    /* Read raw binary payload until client closes socket (EOF) */
     while ((bytes_read = read(STDIN_FILENO, buffer, sizeof(buffer))) > 0) {
         size_t written = fwrite(buffer, 1, bytes_read, fp);
         if (written < (size_t)bytes_read) {
-            perror("[RUN_SERVER_GET] Disk write error");
+            perror("[RUN_SERVER_RECV ERROR] Disk write error");
             fclose(fp);
             return EXIT_FAILURE;
         }
+        total_written += written;
     }
 
     fflush(fp);
     fclose(fp);
+
+    fprintf(stderr, "[RUN_SERVER_RECV SUCCESS] Wrote %zu bytes to '%s'\n", total_written, filepath);
     return EXIT_SUCCESS;
 }
