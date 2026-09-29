@@ -7,7 +7,7 @@
 #include <sys/stat.h>
 #include <errno.h>
 
-#define SERVER_IP "10.0.2.15"  /* Matches your server IP */
+#define SERVER_IP "10.171.132.40"  /* Matches your server IP */
 #define CONTROL_PORT 8012
 #define BUFFER_SIZE 8192
 
