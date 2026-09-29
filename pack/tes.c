@@ -8,7 +8,7 @@
 #include <sys/wait.h>
 #include "network.h"
 
-#define SERVER_IP "127.0.0.1"
+#define SERVER_IP "10.171.132.40"
 #define CONTROL_PORT 8012
 #define BUFFER_SIZE 8192
 
