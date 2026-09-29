@@ -5,7 +5,7 @@
 #include <arpa/inet.h>
 #include <sys/socket.h>
 
-#define SERVER_IP "10.0.2.15"
+#define SERVER_IP "10.171.132.40"
 #define CONTROL_PORT 8012
 #define MAX_CMD 1024
 
