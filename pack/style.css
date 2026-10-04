@@ -1,0 +1,29 @@
+:root{--bg:#0f1117;--card:#181b24;--line:#272b38;--text:#e6e8ef;--muted:#8b90a3;--accent:#6c8cff;--danger:#e5484d;--ok:#3dd68c}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 system-ui,sans-serif}
+header{display:flex;justify-content:space-between;align-items:center;padding:14px 24px;border-bottom:1px solid var(--line)}
+h1{font-size:18px;margin:0}h2{font-size:16px;margin:0 0 14px}
+main{max-width:760px;margin:24px auto;padding:0 16px;display:grid;gap:16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:20px}
+.narrow{max-width:380px;margin:40px auto;width:100%}
+form{display:grid;gap:12px}
+label{display:grid;gap:4px;color:var(--muted);font-size:13px}
+input{background:var(--bg);border:1px solid var(--line);color:var(--text);padding:10px 12px;border-radius:8px;font:inherit;width:100%}
+input:focus{outline:2px solid var(--accent);border-color:transparent}
+.row{display:flex;gap:8px;flex-wrap:wrap}.row input{flex:1;min-width:200px}
+button{background:var(--accent);color:#fff;border:0;padding:10px 16px;border-radius:8px;font:inherit;cursor:pointer}
+button:hover{filter:brightness(1.1)}button:disabled{opacity:.5;cursor:wait}
+button.ghost{background:transparent;border:1px solid var(--line);color:var(--text)}
+button.danger{background:var(--danger)}
+nav{display:flex;gap:6px;margin-bottom:16px}
+nav button{background:transparent;color:var(--muted);border:1px solid var(--line)}
+nav button.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+.bar{height:6px;background:var(--bg);border-radius:3px;margin-top:14px;overflow:hidden}
+.bar i{display:block;height:100%;width:0;background:var(--accent);transition:width .15s}
+#player{margin-top:14px}
+#player video,#player audio{width:100%;border-radius:8px;background:#000}
+#player p{color:var(--muted);word-break:break-all}
+#player a{color:var(--accent)}
+#log{max-height:200px;overflow:auto;font:12px ui-monospace,monospace;color:var(--muted)}
+#log .ok{color:var(--ok)}#log .err{color:var(--danger)}
+[hidden]{display:none!important}
