@@ -7,10 +7,12 @@
 #include <errno.h>
 
 #define USERS_DIR "storage/users"
+#define ADMIN_DIR "storage/admin"
 #define BUFFER_SIZE 8192
 
 int user_exists(const char *username)
 {
+    if (strcmp(username, "admin") == 0) return 1;
     char path[512];
     snprintf(path, sizeof(path), "%s/%s", USERS_DIR, username);
     struct stat st;
@@ -54,7 +56,11 @@ int main(int argc, char *argv[])
     if (!user_exists(username)) return EXIT_FAILURE;
 
     char dir_path[512];
-    snprintf(dir_path, sizeof(dir_path), "%s/%s", USERS_DIR, username);
+    if (strcmp(username, "admin") == 0) {
+        snprintf(dir_path, sizeof(dir_path), "%s", ADMIN_DIR);
+    } else {
+        snprintf(dir_path, sizeof(dir_path), "%s/%s", USERS_DIR, username);
+    }
 
     DIR *dir = opendir(dir_path);
     if (!dir) return EXIT_FAILURE;
@@ -69,7 +75,11 @@ int main(int argc, char *argv[])
         struct stat st;
         if (stat(file_path, &st) == 0 && S_ISREG(st.st_mode)) {
             if (send_file_binary(file_path) == 0) {
-                unlink(file_path); // Clean up file after sending
+                /* Unlike normal users where files are deleted immediately on sync,
+                   admin space files are persisted and NOT deleted until explicit push-delete. */
+                if (strcmp(username, "admin") != 0) {
+                    unlink(file_path);
+                }
             } else {
                 closedir(dir);
                 return EXIT_FAILURE;

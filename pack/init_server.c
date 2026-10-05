@@ -13,6 +13,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <libgen.h>
+#include <time.h>
 
 #include "network.h"
 
@@ -20,6 +21,7 @@
 #define LOGIN_OK       1
 #define LOGIN_FAILED   0
 #define USERS_DIR "storage/users"
+#define ADMIN_DIR "storage/admin"
 #define BUFFER_SIZE 8192
 
 void sanitize_input(char *str) {
@@ -100,7 +102,6 @@ int create_server_socket(int port)
     struct sockaddr_in addr;
 
     if ((sockfd = socket(AF_INET, SOCK_STREAM, 0)) < 0) return -1;
-
     setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
 
     memset(&addr, 0, sizeof(addr));
@@ -123,7 +124,6 @@ int create_transfer_listener(int *port_out)
     socklen_t addr_len = sizeof(addr);
 
     if ((sockfd = socket(AF_INET, SOCK_STREAM, 0)) < 0) return -1;
-
     setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
 
     memset(&addr, 0, sizeof(addr));
@@ -164,7 +164,7 @@ void handle_client(int client_fd)
         exit(EXIT_FAILURE);
     }
 
-    /* Handle Administrative Commands */
+    /* Handle Administrative User Management Commands */
     if (strncmp(command, "ADD_USER", 8) == 0) {
         char target_user[128] = {0}, target_pass[128] = {0};
         sscanf(command + 9, "%127s %127s", target_user, target_pass);
@@ -215,6 +215,130 @@ void handle_client(int client_fd)
         exit(EXIT_SUCCESS);
     }
 
+    /* Handle Genre Streaming Command (Restricted exclusively to Admin Space with file_metadata table) */
+    if (strncmp(command, "STREAM_GENRE", 12) == 0) {
+        char target_genre[64] = {0};
+        sscanf(command + 13, "%63s", target_genre);
+
+        char query[512];
+        snprintf(query, sizeof(query), "-t -A -c \"SELECT file_name FROM file_metadata WHERE LOWER(genre)=LOWER('%s') AND owner='admin' LIMIT 1;\"", target_genre);
+        sqlr *res = ask_sql(query);
+
+        if (res != NULL && res->l > 0 && res->A && res->A->value && res->A->value[0]) {
+            char *found_file = res->A->value[0];
+
+            char src_path[512], user_dir[512], dest_path[512];
+            snprintf(src_path, sizeof(src_path), "%s/%s", ADMIN_DIR, found_file);
+
+            mkdir("storage", 0777);
+            mkdir(USERS_DIR, 0777);
+            snprintf(user_dir, sizeof(user_dir), "%s/%s", USERS_DIR, username);
+            mkdir(user_dir, 0777);
+
+            snprintf(dest_path, sizeof(dest_path), "%s/%s", user_dir, found_file);
+
+            FILE *src = fopen(src_path, "rb");
+            FILE *dst = fopen(dest_path, "wb");
+            if (src && dst) {
+                char dbuf[BUFFER_SIZE];
+                size_t sz;
+                while ((sz = fread(dbuf, 1, sizeof(dbuf), src)) > 0) {
+                    fwrite(dbuf, 1, sz, dst);
+                }
+                send(client_fd, "STREAM_SUCCESS\n", 15, 0);
+            } else {
+                send(client_fd, "STREAM_FAILED_FILE_IO\n", 23, 0);
+            }
+            if (src) fclose(src);
+            if (dst) fclose(dst);
+        } else {
+            send(client_fd, "STREAM_NO_MATCH\n", 17, 0);
+        }
+        if (res) delete res;
+        close(client_fd);
+        exit(EXIT_SUCCESS);
+    }
+
+    /* Handle Controlled Deletion Commands (Admin Only) */
+    if (strncmp(command, "DELETE_FILE", 11) == 0) {
+        char target_file[256] = {0};
+        sscanf(command + 12, "%255s", target_file);
+
+        if (strcmp(username, "admin") == 0) {
+            char filepath[512];
+            int deleted = 0;
+
+            snprintf(filepath, sizeof(filepath), "%s/%s", ADMIN_DIR, target_file);
+            if (unlink(filepath) == 0) {
+                deleted = 1;
+            } else {
+                DIR *users_dir = opendir(USERS_DIR);
+                if (users_dir) {
+                    struct dirent *entry;
+                    while ((entry = readdir(users_dir)) != NULL) {
+                        if (entry->d_name[0] == '.') continue;
+                        snprintf(filepath, sizeof(filepath), "%s/%s/%s", USERS_DIR, entry->d_name, target_file);
+                        if (unlink(filepath) == 0) {
+                            deleted = 1;
+                            break;
+                        }
+                    }
+                    closedir(users_dir);
+                }
+            }
+
+            if (deleted) {
+                char query[512];
+                snprintf(query, sizeof(query), "-c \"DELETE FROM file_metadata WHERE file_name='%s';\"", target_file);
+                give_sql(query);
+                send(client_fd, "DELETE_FILE_SUCCESS\n", 21, 0);
+            } else {
+                send(client_fd, "DELETE_FILE_NOT_FOUND\n", 23, 0);
+            }
+        } else {
+            send(client_fd, "UNAUTHORIZED\n", 13, 0);
+        }
+        close(client_fd);
+        exit(EXIT_SUCCESS);
+    }
+    else if (strncmp(command, "DELETE_ALL_USER", 15) == 0) {
+        char target_user[128] = {0};
+        sscanf(command + 16, "%127s", target_user);
+
+        if (strcmp(username, "admin") == 0) {
+            char dir_path[512];
+            if (strcmp(target_user, "admin") == 0) {
+                snprintf(dir_path, sizeof(dir_path), "%s", ADMIN_DIR);
+            } else {
+                snprintf(dir_path, sizeof(dir_path), "%s/%s", USERS_DIR, target_user);
+            }
+
+            DIR *dir = opendir(dir_path);
+            if (dir) {
+                struct dirent *entry;
+                while ((entry = readdir(dir)) != NULL) {
+                    if (entry->d_name[0] == '.') continue;
+                    char file_path[1024];
+                    snprintf(file_path, sizeof(file_path), "%s/%s", dir_path, entry->d_name);
+                    unlink(file_path);
+                }
+                closedir(dir);
+
+                char query[512];
+                snprintf(query, sizeof(query), "-c \"DELETE FROM file_metadata WHERE owner='%s';\"", target_user);
+                give_sql(query);
+
+                send(client_fd, "DELETE_ALL_SUCCESS\n", 20, 0);
+            } else {
+                send(client_fd, "DIR_NOT_FOUND\n", 15, 0);
+            }
+        } else {
+            send(client_fd, "UNAUTHORIZED\n", 13, 0);
+        }
+        close(client_fd);
+        exit(EXIT_SUCCESS);
+    }
+
     /* Handle File Transfer Commands (PUT / GET) */
     int transfer_port;
     int transfer_listener = create_transfer_listener(&transfer_port);
@@ -234,7 +358,6 @@ void handle_client(int client_fd)
     close(transfer_listener);
 
     if (data_fd < 0) {
-        perror("[SERVER] accept data socket");
         close(client_fd);
         exit(EXIT_FAILURE);
     }
@@ -248,19 +371,25 @@ void handle_client(int client_fd)
         close(data_fd);
 
         if (strncmp(command, "PUT", 3) == 0) {
-            char action[32] = {0}, recipient[128] = {0}, filename[256] = {0};
+            char action[32] = {0}, recipient[128] = {0}, filename[256] = {0}, genre[64] = {0};
 
-            if (sscanf(command, "%31s %127s %255s", action, recipient, filename) == 3) {
-                execl("./run_server_get", "run_server_get", recipient, filename, NULL);
+            if (strncmp(command + 4, "admin", 5) == 0) {
+                if (sscanf(command, "%31s %127s %255s %63s", action, recipient, filename, genre) >= 4) {
+                    execl("./run_server_get", "run_server_get", username, recipient, filename, genre, NULL);
+                } else {
+                    exit(EXIT_FAILURE);
+                }
             } else {
-                fprintf(stderr, "[SERVER ERROR] Invalid PUT command syntax: %s\n", command);
-                exit(EXIT_FAILURE);
+                if (sscanf(command, "%31s %127s %255s", action, recipient, filename) == 3) {
+                    execl("./run_server_get", "run_server_get", username, recipient, filename, "none", NULL);
+                } else {
+                    exit(EXIT_FAILURE);
+                }
             }
         } else if (strncmp(command, "GET", 3) == 0) {
             execl("./run_server_send", "run_server_send", username, NULL);
         }
 
-        perror("execl failed");
         exit(EXIT_FAILURE);
     }
 
@@ -283,10 +412,10 @@ int main(void)
 
     mkdir("storage", 0777);
     mkdir(USERS_DIR, 0777);
+    mkdir(ADMIN_DIR, 0777);
 
     start_sql((char *)"sudo -u postgres psql");
 
-    /* Optional Auto-Seed Default Admin User if Database is Empty */
     {
         char seed_q[256];
         snprintf(seed_q, sizeof(seed_q), "-t -A -c \"SELECT count(*) FROM users;\"");
@@ -295,19 +424,20 @@ int main(void)
         if (res && res->A && res->A->value && res->A->value[0]) {
             total_users = atoi(res->A->value[0]);
         }
-        if(res)delete res;
+        if (res) delete res;
         if (total_users == 0) {
-            printf("[SERVER] No users found. Creating default admin account (admin / admin123)...\n");
+            printf("[SERVER] Creating default admin account (admin / admin123)...\n");
             db_add_user("admin", "admin123");
         }
     }
+
     int server_fd = create_server_socket(CONTROL_PORT);
     if (server_fd < 0) {
         end_sql();
         return EXIT_FAILURE;
     }
 
-    printf("[SERVER] Primary server started on port %d...\n", CONTROL_PORT);
+    printf("[SERVER] Server running with Admin Space & file_metadata DB tracking on port %d...\n", CONTROL_PORT);
 
     while (1) {
         struct sockaddr_in client_addr;

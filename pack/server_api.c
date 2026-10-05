@@ -61,7 +61,7 @@ void send_admin_command(const char *admin_user, const char *admin_pass, const ch
 
     read_line(control_fd, buffer, sizeof(buffer));
     if (strcmp(buffer, "LOGIN_OK") != 0) {
-        printf("[CLIENT] Authentication failed using bootstrap account: %s\n", buffer);
+        printf("[CLIENT] Authentication failed: %s\n", buffer);
         close(control_fd);
         return;
     }
@@ -82,7 +82,6 @@ int main(void) {
     printf("   WRAPPER CLI - AUTHENTICATION MANAGER    \n");
     printf("===========================================\n");
 
-    /* Outer Loop: Allows switching between Sign In, Sign Up, or Exit */
     while (1) {
         printf("\nMain Menu:\n");
         printf("  1. Sign In\n");
@@ -100,7 +99,6 @@ int main(void) {
         }
 
         if (strcmp(choice, "2") == 0) {
-            /* SIGN UP FLOW */
             char new_user[128] = {0};
             char new_pass[128] = {0};
 
@@ -118,17 +116,14 @@ int main(void) {
                 continue;
             }
 
-            printf("[SYSTEM] Authenticating with bootstrap credentials (testuser / testpass) to create account...\n");
+            printf("[SYSTEM] Authenticating with bootstrap credentials to create account...\n");
             char payload[512];
             snprintf(payload, sizeof(payload), "ADD_USER %s %s", new_user, new_pass);
-
-            /* Uses testuser / testpass to authorize account creation */
-            send_admin_command("testuser", "testpass", payload);
-            continue; /* Loops back to main menu so user can now Sign In */
+            send_admin_command("admin", "admin123", payload);
+            continue;
         }
 
         else if (strcmp(choice, "1") == 0) {
-            /* SIGN IN FLOW */
             char username[128] = {0};
             char password[128] = {0};
 
@@ -144,14 +139,17 @@ int main(void) {
             printf("\n[SYSTEM] Logged in successfully as '%s'\n\n", username);
 
             printf("Available commands:\n");
-            printf("  sync                                : Runs ./receive %s %s ./downloads\n", username, password);
-            printf("  send <recipient> <local_file>       : Runs ./sender %s %s <recipient> <local_file> <local_file>\n", username, password);
-            printf("  add_user <user> <pass>              : Create a new remote account\n");
-            printf("  update_user <user> <new_pass>       : Update an account's password\n");
-            printf("  delete_user <user>                  : Delete a user account\n");
-            printf("  logout                              : Return to main menu\n\n");
+            printf("  sync                                                : Download pending files from your mailbox\n");
+            printf("  send <recipient> <local_file>                       : Send regular file to user repository\n");
+            printf("  send admin <local_file> <genre>                     : Send video to admin storage with genre tag\n");
+            printf("  stream_genre <genre>                                : Stream matching video from admin space to your storage\n");
+            printf("  add_user <user> <pass>                              : Create a new account\n");
+            printf("  update_user <user> <new_pass>                       : Update user password\n");
+            printf("  delete_user <user>                                  : Delete a user account\n");
+            printf("  delete_file <filename>                              : (Admin) Delete single file globally\n");
+            printf("  delete_all_user <user_or_admin>                     : (Admin) Clear user mailbox or admin repository\n");
+            printf("  logout                                              : Return to main menu\n\n");
 
-            /* Inner Command Loop */
             char input_line[512];
             while (1) {
                 printf("%s@app> ", username);
@@ -162,11 +160,11 @@ int main(void) {
 
                 if (strcmp(input_line, "logout") == 0 || strcmp(input_line, "exit") == 0) {
                     printf("[SYSTEM] Logging out from '%s'.\n", username);
-                    break; // Breaks inner loop, returns to outer authentication menu
+                    break;
                 }
 
-                char cmd[32] = {0}, arg1[256] = {0}, arg2[256] = {0};
-                int num_args = sscanf(input_line, "%s %s %s", cmd, arg1, arg2);
+                char cmd[32] = {0}, arg1[256] = {0}, arg2[256] = {0}, arg3[256] = {0};
+                int num_args = sscanf(input_line, "%s %s %s %s", cmd, arg1, arg2, arg3);
 
                 if (strcmp(cmd, "sync") == 0) {
                     snprintf(sys_cmd, sizeof(sys_cmd), "./receive %s %s ./downloads", username, password);
@@ -175,14 +173,35 @@ int main(void) {
                     printf("\n");
                 }
                 else if (strcmp(cmd, "send") == 0) {
-                    if (num_args < 3) {
-                        printf("Usage: send <recipient> <local_file>\n");
-                        printf("Example: send admin video.mp4\n\n");
+                    if (strcmp(arg1, "admin") == 0) {
+                        if (num_args < 4) {
+                            printf("Usage for Admin: send admin <local_file> <genre>\n");
+                            printf("Example: send admin video.mp4 action\n\n");
+                        } else {
+                            snprintf(sys_cmd, sizeof(sys_cmd), "./sender %s %s admin %s %s %s", username, password, arg2, arg2, arg3);
+                            printf("[RUNNING] %s\n", sys_cmd);
+                            system(sys_cmd);
+                            printf("\n");
+                        }
                     } else {
-                        snprintf(sys_cmd, sizeof(sys_cmd), "./sender %s %s %s %s %s", username, password, arg1, arg2, arg2);
-                        printf("[RUNNING] %s\n", sys_cmd);
-                        system(sys_cmd);
-                        printf("\n");
+                        if (num_args < 3) {
+                            printf("Usage for User: send <recipient> <local_file>\n");
+                            printf("Example: send bob document.txt\n\n");
+                        } else {
+                            snprintf(sys_cmd, sizeof(sys_cmd), "./sender %s %s %s %s %s", username, password, arg1, arg2, arg2);
+                            printf("[RUNNING] %s\n", sys_cmd);
+                            system(sys_cmd);
+                            printf("\n");
+                        }
+                    }
+                }
+                else if (strcmp(cmd, "stream_genre") == 0) {
+                    if (num_args < 2) {
+                        printf("Usage: stream_genre <genre>\n\n");
+                    } else {
+                        char payload[512];
+                        snprintf(payload, sizeof(payload), "STREAM_GENRE %s", arg1);
+                        send_admin_command(username, password, payload);
                     }
                 }
                 else if (strcmp(cmd, "add_user") == 0) {
@@ -212,8 +231,26 @@ int main(void) {
                         send_admin_command(username, password, payload);
                     }
                 }
+                else if (strcmp(cmd, "delete_file") == 0) {
+                    if (num_args < 2) {
+                        printf("Usage: delete_file <filename>\n\n");
+                    } else {
+                        char payload[512];
+                        snprintf(payload, sizeof(payload), "DELETE_FILE %s", arg1);
+                        send_admin_command(username, password, payload);
+                    }
+                }
+                else if (strcmp(cmd, "delete_all_user") == 0) {
+                    if (num_args < 2) {
+                        printf("Usage: delete_all_user <username_or_admin>\n\n");
+                    } else {
+                        char payload[512];
+                        snprintf(payload, sizeof(payload), "DELETE_ALL_USER %s", arg1);
+                        send_admin_command(username, password, payload);
+                    }
+                }
                 else {
-                    printf("Unknown command. Options: sync, send, add_user, update_user, delete_user, logout\n\n");
+                    printf("Unknown command. Options: sync, send, stream_genre, add_user, update_user, delete_user, delete_file, delete_all_user, logout\n\n");
                 }
             }
         }

@@ -52,18 +52,18 @@ int connect_to_host(const char *ip, int port) {
 }
 
 int main(int argc, char *argv[]) {
-    /* Updated usage to include <recipient> */
     if (argc < 6) {
-        printf("Usage: %s <username> <password> <recipient> <local_file> <remote_file_name>\n", argv[0]);
-        printf("Example: %s arav mypass srt video.mp4 receiver_video.mp4\n", argv[0]);
+        printf("Usage for normal user: %s <username> <password> <recipient_user> <local_file> <remote_file>\n", argv[0]);
+        printf("Usage for admin storage: %s <username> <password> admin <local_file> <remote_file> <genre>\n", argv[0]);
         return EXIT_FAILURE;
     }
 
     const char *user = argv[1];
     const char *pass = argv[2];
-    const char *recipient = argv[3];    /* Target user (e.g., srt) */
+    const char *recipient = argv[3];
     const char *local_file = argv[4];
     const char *remote_file = argv[5];
+    const char *genre = (strcmp(recipient, "admin") == 0 && argc >= 7) ? argv[6] : "";
 
     FILE *fp = fopen(local_file, "rb");
     if (!fp) {
@@ -79,7 +79,7 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
-    /* 2. Authenticate as sender (e.g., arav) */
+    /* 2. Authenticate as sender */
     char buffer[256];
     snprintf(buffer, sizeof(buffer), "%s\n", user);
     send(control_fd, buffer, strlen(buffer), 0);
@@ -94,8 +94,12 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
-    /* 3. Issue PUT command specifying RECIPIENT and REMOTE_FILE */
-    snprintf(buffer, sizeof(buffer), "PUT %s %s\n", recipient, remote_file);
+    /* 3. Issue PUT command depending on whether recipient is admin */
+    if (strcmp(recipient, "admin") == 0) {
+        snprintf(buffer, sizeof(buffer), "PUT %s %s %s\n", recipient, remote_file, genre);
+    } else {
+        snprintf(buffer, sizeof(buffer), "PUT %s %s\n", recipient, remote_file);
+    }
     send(control_fd, buffer, strlen(buffer), 0);
 
     /* 4. Get dynamic data transfer port */
@@ -117,7 +121,7 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
-    printf("[SENDER] Uploading '%s' to '%s' as '%s'...\n", local_file, recipient, remote_file);
+    printf("[SENDER] Uploading '%s' to '%s'...\n", local_file, recipient);
     char buf[BUFFER_SIZE];
     size_t n;
     while ((n = fread(buf, 1, sizeof(buf), fp)) > 0) {
@@ -127,7 +131,12 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    printf("[SENDER] Transfer complete. File delivered to '%s's mailbox!\n", recipient);
+    // FIX: Gracefully shutdown write direction so the server reads EOF cleanly and flushes disk writes
+    if (shutdown(data_fd, SHUT_WR) < 0) {
+        perror("[SENDER] Socket shutdown failed");
+    }
+
+    printf("[SENDER] Transfer complete. File delivered successfully!\n");
     fclose(fp);
     close(data_fd);
     return EXIT_SUCCESS;
