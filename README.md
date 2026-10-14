@@ -2,14 +2,11 @@
 
 ## Project Objectives
 
-1. **Develop a high-speed data transfer system** using **XDP, eBPF, AF_XDP, and io_uring** to minimize unnecessary data copies and reduce processing overhead during data transmission between the Internet, servers, and hosts.
+1. **Develop modular client-server applications** featuring a frontend UI connected to an integrated client backend engine for session tracking, socket communication, and concurrent request management across Host-to-Host and Host-to-Many configurations.
 
-2. **Implement two data-sharing modes:**
+2. **Design a high-speed data path** utilizing client-server sockets, shared buffer pools, and local file systems for storage management on both endpoints.
 
-   * **Host-to-Host:** Enable direct data transfer between two participating hosts through the system.
-   * **Host-to-Many:** Allow a host to publish data through the system so that multiple users or hosts can access the shared content.
-
-3. **Design a server-mediated data transfer architecture** in which intermediate data is handled by a server while leveraging **zero-copy/low-copy data paths, shared buffers, and asynchronous I/O** to improve throughput, reduce latency, and maintain responsiveness under high data loads.
+3. **Integrate user-space Linux acceleration libraries** (liburing, libxdp, and libbpf) directly within the unified client backend engine to evaluate system throughput, latency, and resource utilization when communicating with standard server socket implementations.
 
 ---
 
