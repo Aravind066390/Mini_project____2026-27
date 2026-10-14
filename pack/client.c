@@ -4,8 +4,7 @@
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <sys/socket.h>
-
-#define SERVER_IP "10.171.132.40"
+#include"server_api.h"
 #define CONTROL_PORT 8012
 #define BUFFER_SIZE 8192
 

@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ZShare Control Center</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="login" class="overlay">
+  <form id="loginForm" class="panel">
+    <h1>ZShare</h1>
+    <input id="lu" placeholder="Username" required autocomplete="username">
+    <input id="lp" type="password" placeholder="Password" required autocomplete="current-password">
+    <button>Connect</button>
+    <p id="loginErr" class="err"></p>
+  </form>
+</div>
+ 
+<div id="app" hidden>
+  <aside>
+    <h1>ZShare</h1>
+    <nav>
+      <button data-v="workspaces" class="on">Workspaces</button>
+      <button data-v="admin">Admin Repository</button>
+      <button data-v="terminal">Daemon Shell</button>
+    </nav>
+    <div class="foot"><span id="who"></span><button id="logout" class="ghost">Log out</button></div>
+  </aside>
+ 
+  <main>
+    <section id="workspaces" class="view">
+      <div class="bar"><h2>User workspaces</h2><button id="sync" class="ghost">Sync mailbox</button></div>
+      <form id="sendForm" class="row">
+        <input id="sendTo" placeholder="Recipient (or admin)" required>
+        <input id="sendFile" type="file" required>
+        <input id="sendGenre" placeholder="Genre (admin only)">
+        <button>Send file</button>
+      </form>
+      <p id="sendOut" class="note"></p>
+      <div class="split">
+        <ul id="users" class="list"></ul>
+        <div>
+          <h3 id="wsTitle">Select a user</h3>
+          <table><thead><tr><th>File</th><th>Type</th><th>Size</th><th></th></tr></thead><tbody id="files"></tbody></table>
+        </div>
+      </div>
+    </section>
+ 
+    <section id="admin" class="view" hidden>
+      <div class="bar"><h2>Admin repository</h2><button id="reloadMeta" class="ghost">Refresh</button></div>
+      <form id="genreForm" class="row">
+        <input id="genre" placeholder="Stream by genre (e.g. Action, Sci-Fi)" required>
+        <button>Stream genre</button>
+      </form>
+      <p id="genreOut" class="note"></p>
+      <table><thead><tr><th>Owner</th><th>File</th><th>Original name</th><th>Genre</th><th></th></tr></thead><tbody id="meta"></tbody></table>
+    </section>
+ 
+    <section id="terminal" class="view" hidden>
+      <h2>Daemon shell</h2>
+      <div id="screen"></div>
+      <form id="termForm"><span>server_api&gt;</span><input id="cmd" autocomplete="off" autofocus></form>
+    </section>
+  </main>
+</div>
+<script src="script.js"></script>
+</body>
+</html>
+ 

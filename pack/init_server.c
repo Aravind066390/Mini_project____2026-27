@@ -373,7 +373,7 @@ void handle_client(int client_fd)
         if (strncmp(command, "PUT", 3) == 0) {
             char action[32] = {0}, recipient[128] = {0}, filename[256] = {0}, genre[64] = {0};
 
-            if (strncmp(command + 4, "admin", 5) == 0) {
+            if (strncmp(command+4,"admin", 5) == 0) {
                 if (sscanf(command, "%31s %127s %255s %63s", action, recipient, filename, genre) >= 4) {
                     execl("./run_server_get", "run_server_get", username, recipient, filename, genre, NULL);
                 } else {

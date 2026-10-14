@@ -7,7 +7,7 @@
 #include <sys/stat.h>
 #include <errno.h>
 
-#define SERVER_IP "10.171.132.40"  /* Matches your server IP */
+#define SERVER_IP "10.171.132.40"
 #define CONTROL_PORT 8012
 #define BUFFER_SIZE 8192
 
@@ -53,8 +53,7 @@ int ensure_directory_exists(const char *dir_path) {
 
 int main(int argc, char *argv[]) {
     if (argc < 4) {
-        printf("Usage: %s <username> <password> <output_dir_or_file>\n", argv[0]);
-        printf("Example: %s testuser testpass ./downloads\n", argv[0]);
+        printf("Usage: %s <username> <password> <output_dir>\n", argv[0]);
         return EXIT_FAILURE;
     }
 
@@ -104,43 +103,50 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
-    /* Ensure output folder exists if downloading to directory */
     ensure_directory_exists(output_target);
 
-    char save_path[512];
-    struct stat st;
-    if (stat(output_target, &st) == 0 && S_ISDIR(st.st_mode)) {
-        snprintf(save_path, sizeof(save_path), "%s/downloaded_mailbox.bin", output_target);
-    } else {
-        snprintf(save_path, sizeof(save_path), "%s", output_target);
+    printf("[RECEIVER] Synchronizing pending files into '%s'...\n", output_target);
+    int files_received = 0;
+
+    while (1) {
+        char filename[256];
+        if (read_line(data_fd, filename, sizeof(filename)) <= 0) break;
+        if (strcmp(filename, "EOF") == 0 || strlen(filename) == 0) break;
+
+        char size_buf[64];
+        if (read_line(data_fd, size_buf, sizeof(size_buf)) <= 0) break;
+        long long file_size = atoll(size_buf);
+
+        char save_path[512];
+        snprintf(save_path, sizeof(save_path), "%s/%s", output_target, filename);
+
+        FILE *fp = fopen(save_path, "wb");
+        if (!fp) {
+            perror("[RECEIVER] Failed to open local file for writing");
+            continue;
+        }
+
+        long long bytes_remaining = file_size;
+        char buf[BUFFER_SIZE];
+        while (bytes_remaining > 0) {
+            size_t to_read = (bytes_remaining < BUFFER_SIZE) ? bytes_remaining : BUFFER_SIZE;
+            ssize_t n = recv(data_fd, buf, to_read, 0);
+            if (n <= 0) break;
+            fwrite(buf, 1, n, fp);
+            bytes_remaining -= n;
+        }
+
+        fclose(fp);
+        printf("[RECEIVER] Downloaded: %s (%lld bytes)\n", filename, file_size);
+        files_received++;
     }
 
-    FILE *fp = fopen(save_path, "wb");
-    if (!fp) {
-        perror("[RECEIVER] Cannot open local output destination");
-        close(data_fd);
-        return EXIT_FAILURE;
-    }
-
-    printf("[RECEIVER] Retrieving all pending files into '%s'...\n", save_path);
-    char buf[BUFFER_SIZE];
-    ssize_t n;
-    size_t total_bytes = 0;
-
-    while ((n = recv(data_fd, buf, sizeof(buf), 0)) > 0) {
-        fwrite(buf, 1, n, fp);
-        total_bytes += n;
-    }
-
-    fflush(fp);
-    fclose(fp);
     close(data_fd);
 
-    if (total_bytes == 0) {
-        printf("[RECEIVER] Mailbox empty. No pending files found on server.\n");
-        unlink(save_path); // Delete empty file
+    if (files_received == 0) {
+        printf("[RECEIVER] Mailbox empty. No pending files found on server[cite: 3].\n");
     } else {
-        printf("[RECEIVER] Download complete. Total retrieved: %zu bytes.\n", total_bytes);
+        printf("[RECEIVER] Sync complete. Successfully retrieved %d file(s).\n", files_received);
     }
 
     return EXIT_SUCCESS;
